@@ -1,235 +1,302 @@
 # LedgerForge — Employee, Payroll & Accounting API
 
-LedgerForge is a Python-based backend project developed as part of the Aura Workforce Python Developers training track. It begins with a working FastAPI skeleton and evolves into an employee management, attendance, payroll, and accounting platform over four weeks.
+LedgerForge is a Python-based backend project developed as part of the Aura Workforce Python Developers training track. It evolves from a FastAPI starter application into an employee management, salary, attendance, payroll, and accounting platform.
 
-**Current version:** v0.0.1  
-**Current milestone:** LF-01 — Project Bootstrap & Repository Setup  
-**Technology:** Python, FastAPI, SQLAlchemy, Pydantic, SQLite (starter configuration), Git and Pytest
+The project focuses on REST API development, relational database modelling, data seeding, effective-dated salary structures, salary revision history, and automated testing.
 
-> **Training project:** All company and business data used in LedgerForge is fictional and intended for learning purposes only.
+## Project Information
 
-## Features Available in the Starter Project
+| Item | Details |
+|---|---|
+| Project | LedgerForge |
+| Track | Aura Workforce — Python Developers |
+| Language | Python |
+| Framework | FastAPI |
+| ORM | SQLAlchemy |
+| Validation | Pydantic |
+| Database | SQLite starter configuration |
+| Migrations | Alembic |
+| Testing | Pytest |
+| Repository | [05_Starter_Project](https://github.com/Sudharsana27/05_Starter_Project) |
+| Phase tag | `phase-1` |
+| Current task branch | `lf-05-salary-structures` |
 
+**Training project:** All company and business data used in LedgerForge is fictional and intended for educational purposes only.
+
+## Features
+
+### Application foundation
 - FastAPI application with interactive Swagger documentation.
 - Health-check endpoint at `GET /health`.
-- Department listing and department lookup endpoints.
-- SQLAlchemy model for the Department entity.
-- Example CSV data seeder.
-- Environment-based application configuration.
-- Automated tests using Pytest.
-- Git version control and GitHub repository integration.
+- Environment-based configuration.
+- SQLAlchemy database integration.
+- Alembic migration support.
+- Git-based development workflow.
+
+### Data management
+- Department, employee, role, and employee-assignment models.
+- CSV data seeding support.
+- Relational database constraints and relationships.
+- Employee and department API functionality.
+
+### Employee and team management
+- Employee creation, retrieval, and update functionality.
+- Employee search, department filtering, and pagination.
+- Manager–team relationships using employee identifiers.
+- Team-member retrieval.
+- Soft-delete support using an employee exit date.
+
+### Salary structure and revision
+- SQLAlchemy models for salary components, salary structures, and salary revisions.
+- Effective-date-based salary structure retrieval.
+- Salary revision functionality that closes previous records and creates new records.
+- Revision history with reasons for changes.
+- Automated tests for salary API functionality.
+
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Python | Application logic |
+| FastAPI | REST API development |
+| SQLAlchemy | Database models and queries |
+| Pydantic | Request validation and response schemas |
+| SQLite | Local development database |
+| Alembic | Database schema migrations |
+| Pytest | Automated testing |
+| Git and GitHub | Version control and collaboration |
 
 ## Prerequisites
 
-Install the following before starting:
+Install the following before running the project:
 
-- Python 3.11 or newer.
+- Python 3.12 recommended.
 - Git.
 - Visual Studio Code or another Python IDE.
-- A terminal such as PowerShell, Command Prompt, or Bash.
+- PowerShell, Command Prompt, or another terminal.
 
-Python 3.12 is recommended for this project setup.
+Docker Desktop is required only for workflows that use the project's Docker configuration.
 
-## Getting Started — 8 Steps
+## Getting Started
 
 ### 1. Clone the repository
 
-```bash
+```powershell
 git clone https://github.com/Sudharsana27/05_Starter_Project.git
 cd 05_Starter_Project
 ```
 
 ### 2. Create a virtual environment
 
-```bash
+```powershell
 python -m venv .venv
 ```
 
 ### 3. Activate the virtual environment
 
-**Windows PowerShell:**
+Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-If PowerShell blocks activation, use the following for the current terminal session if needed:
+If PowerShell blocks activation, run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv\Scripts\Activate.ps1
 ```
 
-**macOS/Linux:**
-
-```bash
-source .venv/bin/activate
-```
-
 ### 4. Install dependencies
 
-```bash
+```powershell
 python -m pip install -r requirements.txt
 ```
 
 ### 5. Configure environment variables
 
-Create your local `.env` file from the example.
-
-**Windows PowerShell:**
+Create a local `.env` file using the example configuration provided in the repository.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-**macOS/Linux:**
+Review the database URL and other settings in `.env`. Keep secrets and environment-specific values out of Git.
 
-```bash
-cp .env.example .env
+### 6. Prepare the database
+
+Use the project's Alembic migration workflow when setting up a fresh database:
+
+```powershell
+python -m alembic upgrade head
 ```
 
-Review `.env` and adjust values if necessary. Never commit `.env` or expose secret keys.
-
-### 6. Seed the example data
-
-```bash
-python -m scripts.seed_example
-```
-
-This loads the starter project's example department data into the configured database.
+Follow the project's seeding instructions for the relevant dataset. The example seeder and the full CSV data seeder serve different purposes.
 
 ### 7. Start the API
 
-```bash
+```powershell
 uvicorn app.main:app --reload
 ```
 
-The development server should be available at:
+Open these addresses in your browser:
 
 - API base URL: http://127.0.0.1:8000
 - Interactive Swagger documentation: http://127.0.0.1:8000/docs
 - OpenAPI schema: http://127.0.0.1:8000/openapi.json
 
-Keep the terminal running while using the API. Press `Ctrl+C` to stop the server.
+Keep the terminal running while testing the API. Press `Ctrl+C` to stop the server.
 
-### 8. Run the automated tests
+### 8. Run automated tests
 
-Open another terminal, activate the virtual environment, and run:
-
-```bash
-pytest
+```powershell
+python -m pytest -q
 ```
 
-The starter project currently contains two tests covering the health endpoint and department functionality. Both should pass.
+To run the salary, department, and employee test suites specifically:
 
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/health` | Checks whether the API is responding |
-| GET | `/departments` | Lists available departments |
-| GET | `/departments/{department_id}` | Retrieves a department by ID |
-
-Use Swagger at `/docs` to inspect and try the available endpoints.
-
-A successful health-check response looks like this:
-
-```json
-{
-  "status": "ok"
-}
+```powershell
+python -m pytest tests/test_salary.py tests/test_departments.py tests/test_employees.py -q
 ```
 
-An unknown department ID should return HTTP `404 Not Found`.
+The salary, department, and employee test suites returned **16 passed** in the recorded test run. Run the tests again after subsequent changes to confirm the current result.
+
+## API Documentation
+
+The application exposes interactive API documentation through Swagger at `/docs`.
+
+The API includes functionality for:
+
+| Area | Functionality |
+|---|---|
+| System | Health check |
+| Departments | Department listing and lookup |
+| Employees | Employee creation, retrieval, updates, search, and filtering |
+| Teams | Retrieval of an employee's direct reports |
+| Salary | Salary structure retrieval and salary revision operations |
+
+Consult `/docs` for the exact route paths, HTTP methods, request schemas, and response formats available in the current checkout.
+
+## Salary Structure and Revision Design
+
+Salary information is modelled using three main entities:
+
+- **Salary components:** Represent individual elements of compensation.
+- **Salary structures:** Represent the applicable salary components over an effective period.
+- **Salary revisions:** Record changes to an employee's salary, including the revision date and reason.
+
+The salary service supports retrieving the structure applicable to an employee on a specified date and revising salary records by closing the previous effective period and creating the new records.
+
+Effective-date boundaries are important: the implementation and its tests should ensure that a date returns the correct structure and that salary revision history preserves previous changes.
 
 ## Project Structure
 
 ```text
 05_Starter_Project/
 ├── app/
-│   ├── __init__.py
 │   ├── config.py
 │   ├── database.py
 │   ├── main.py
 │   ├── models.py
 │   ├── schemas.py
+│   ├── salary_service.py
 │   └── routers/
-│       ├── __init__.py
-│       └── departments.py
+│       ├── departments.py
+│       ├── employees.py
+│       └── salary.py
 ├── scripts/
-│   ├── __init__.py
-│   └── seed_example.py
 ├── tests/
-│   ├── __init__.py
-│   └── test_departments.py
+│   ├── test_departments.py
+│   ├── test_employees.py
+│   └── test_salary.py
+├── alembic/
 ├── .env.example
 ├── .gitignore
-├── docker-compose.dev.yml
 ├── requirements.txt
 └── README.md
 ```
 
-## Configuration
-
-Application settings are managed through `app/config.py` and environment variables.
-
-The starter configuration uses SQLite. Later milestones will introduce PostgreSQL, database migrations, and additional configuration for the expanding application.
-
-Keep credentials and environment-specific settings in `.env`, not in source code.
+Some directories may contain additional files as development continues.
 
 ## Development Guidelines
 
-- Create a separate Git branch for each task. For example: `lf-02-employee-model`.
-- Write automated tests for every new endpoint and important business rule.
-- Use SQLAlchemy models for database entities and Pydantic schemas for API input and output.
-- Use `Decimal` rather than `float` for monetary calculations.
-- Use migrations to manage database schema changes.
-- Never commit `.env`, `.venv`, database files, or other generated secrets and local artifacts.
-- Make small, meaningful commits and push completed work to GitHub.
+- Use a separate Git branch for each task.
+- Use SQLAlchemy models for database entities and Pydantic schemas for request validation.
+- Write automated tests for API endpoints and business rules.
+- Use `Decimal` rather than floating-point arithmetic for monetary calculations.
+- Use database migrations to manage schema changes.
+- Validate effective-date ranges to avoid overlaps and incorrect salary history.
+- Never commit `.env`, virtual environments, database files, or secrets.
+- Commit and push completed work regularly.
 
 ## Git Workflow
 
-Create a branch for the next task:
+Create a branch for a new task:
 
-```bash
-git switch -c lf-02-employee-model
+```powershell
+git switch -c lf-06-next-task
 ```
 
-After making changes, run the tests:
+Run tests and review changes:
 
-```bash
-pytest
-```
-
-Review and commit your changes:
-
-```bash
+```powershell
+python -m pytest -q
 git status
-git add .
-git commit -m "LF-02: Add employee data model"
-git push -u origin lf-02-employee-model
+git diff
 ```
 
-Review staged files before committing to ensure no secrets or local environment files are included.
+Stage only the files intended for the commit:
 
-## Roadmap
+```powershell
+git add README.md
+git diff --cached --check
+git diff --cached
+```
 
-| Milestone | Scope |
+Commit and push:
+
+```powershell
+git commit -m "docs: update LedgerForge README"
+git push
+```
+
+For a new branch without an upstream, use:
+
+```powershell
+git push -u origin lf-06-next-task
+```
+
+## Training Roadmap
+
+| Milestones | Scope |
 |---|---|
-| LF-01 | Project setup, API skeleton, tests and Git repository |
-| LF-02 | Employee, department, role and assignment data model |
-| LF-03 | One-command data seeding |
+| LF-01 | Project bootstrap and repository setup |
+| LF-02 | Employee, department, role, and assignment data model |
+| LF-03 | One-command CSV data seeder |
 | LF-04 | Employee and team APIs |
-| LF-05–LF-08 | Salary, attendance, leave, payroll and payslips |
-| LF-09–LF-12 | Accounting ledger, invoices, expenses and payroll posting |
-| LF-13–LF-16 | Authentication, tax reports, financial reports and release candidate |
-| LF-17–LF-20 | Deployment, reliability, exports, final audit and submission |
+| LF-05 | Salary structures and revision history |
+| LF-06–LF-08 | Attendance, leave, payroll, and payslips |
+| LF-09–LF-12 | Accounting ledger, invoices, expenses, and payroll posting |
+| LF-13–LF-16 | Authentication, tax reports, financial reports, and release candidate |
+| LF-17–LF-20 | Deployment, reliability, exports, final audit, and submission |
 
-## Current Status
+## Current Development Status
 
-LF-01 has been implemented with a working API, passing starter tests, a GitHub repository, and the `v0.0.1` release tag.
+The project has progressed beyond its original starter application. The current working branch is `lf-05-salary-structures`, which contains the salary structure and revision API work.
 
-The next milestone is **LF-02 — Employee & Org Data Model**, which will introduce the core employee-related tables, relationships, PostgreSQL migrations, and an ER diagram.
+The recorded verification run for the salary, department, and employee test suites completed with 16 passing tests. Further milestones will extend the application with attendance, payroll, accounting, authentication, reporting, and deployment capabilities.
+
+## Learning Outcomes
+
+This project provides practical experience with:
+
+- Building REST APIs using FastAPI.
+- Modelling relational data with SQLAlchemy.
+- Validating input with Pydantic.
+- Managing database schema changes with Alembic.
+- Loading CSV data into a database.
+- Writing automated tests using Pytest.
+- Maintaining a task-based Git workflow.
 
 ---
 
