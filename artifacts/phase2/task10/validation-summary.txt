@@ -1,0 +1,11 @@
+﻿Task 10 validation evidence
+Focused tests including Client CRUD: 63 passed, 1 Starlette/httpx deprecation warning.
+Command: DATABASE_URL=sqlite:// python -m pytest tests/test_invoice_api.py tests/test_invoice_service.py tests/test_invoicing_models.py tests/test_receivables.py tests/test_migrations.py -q
+Latest test output: client-crud-tests.log
+Fresh migration: Alembic upgrade head succeeded on a new disposable SQLite database; no seeder was run.
+Fresh disposable database: C:\Users\sudha\AppData\Local\Temp\LedgerForge_LF10_FreshMigration_a9a6b093253549ba864beddde89c4460\ledgerforge.sqlite3
+Alembic head: e7c2d10f4b39.
+Official checker command: python C:\Users\sudha\Downloads\verify_ledgerforge.py checks --data C:\Users\sudha\AppData\Local\Temp\LedgerForge_LF10_OfficialCheck
+Latest official checker output: official-checker-client-crud.log; 5/5 passed. Account 1100 and eligible open invoice balances both equal 139,394,278.00.
+Checker inputs were the preserved validation exports; the fresh disposable database was not seeded or used by the checker.
+Client CRUD API is implemented under /clients with HR/ADMIN authorization, pagination, validation, partial updates, and deletion blocked when invoices reference the client. Client API cases are included in the latest focused test run.

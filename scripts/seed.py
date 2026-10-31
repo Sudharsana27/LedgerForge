@@ -1,5 +1,7 @@
 
+from decimal import Decimal
 from pathlib import Path
+from time import perf_counter
 
 import pandas as pd
 from sqlalchemy import (
@@ -30,9 +32,11 @@ PRIORITY = [
     "roles",
     "employees",
     "employee_assignments",
+    "chart_of_accounts",
+    "journal_entries",
+    "journal_lines",
     "clients",
     "vendors",
-    "chart_of_accounts",
     "leave_types",
     "holidays",
     "statutory_rates",
@@ -43,20 +47,31 @@ PRIORITY = [
     "leave_balances",
     "leave_requests",
     "salary_components",
-    "salary_structures",
     "salary_revisions",
+    "salary_structures",
     "performance_reviews",
     "payroll_runs",
     "payroll_items",
     "invoices",
     "invoice_items",
     "invoice_payments",
-    "journal_entries",
-    "journal_lines",
     "expenses",
 ]
 
 EXCLUDED = {"data_dictionary"}
+DECIMAL_TABLES = {
+    "journal_entries",
+    "journal_lines",
+    "invoices",
+    "invoice_items",
+    "invoice_payments",
+}
+MIGRATED_INVOICE_TABLES = {
+    "clients",
+    "invoices",
+    "invoice_items",
+    "invoice_payments",
+}
 
 
 def load_dictionary():
@@ -91,6 +106,12 @@ def create_missing_tables(dictionary):
     """Create missing tables without changing existing table schemas."""
     metadata = MetaData()
     existing = set(inspect(engine).get_table_names())
+    missing_invoice_tables = MIGRATED_INVOICE_TABLES - existing
+    if missing_invoice_tables:
+        raise RuntimeError(
+            "Run Alembic migrations before seeding invoicing data; missing "
+            f"tables: {', '.join(sorted(missing_invoice_tables))}"
+        )
 
     for name, columns in dictionary.items():
         if name in EXCLUDED or name in existing:
@@ -106,7 +127,7 @@ def create_missing_tables(dictionary):
     metadata.create_all(engine)
 
 
-def normalize_value(value, dtype):
+def normalize_value(value, dtype, table_name=None):
     """Convert pandas values into SQLite-compatible Python values."""
     if pd.isna(value) or value == "":
         return None
@@ -123,9 +144,78 @@ def normalize_value(value, dtype):
         return int(value)
 
     if dtype == "decimal":
+        if table_name in DECIMAL_TABLES:
+            return Decimal(str(value))
         return float(value)
 
     return str(value)
+
+
+def normalize_account_parent_code(value, account_codes):
+    """Resolve the source CSV's numeric-looking parent code representation."""
+    if pd.isna(value) or value == "":
+        return None
+
+    parent_code = str(value).strip()
+    if parent_code in account_codes:
+        return parent_code
+    if parent_code.endswith(".0"):
+        normalized = parent_code[:-2]
+        if normalized in account_codes:
+            return normalized
+    raise ValueError(
+        f"Unknown chart-of-accounts parent code: {parent_code}"
+    )
+
+
+def csv_dtypes(table_name):
+    """Keep ledger and invoice IDs, account codes, and decimals as text."""
+    return {
+        "chart_of_accounts": {
+            "account_code": str,
+            "parent_code": str,
+        },
+        "journal_entries": {
+            "total_debit": str,
+            "total_credit": str,
+        },
+        "journal_lines": {
+            "debit": str,
+            "credit": str,
+        },
+        "clients": {
+            "client_id": str,
+            "primary_service_line": str,
+        },
+        "invoices": {
+            "invoice_id": str,
+            "invoice_number": str,
+            "client_id": str,
+            "service_line_account": str,
+            "subtotal": str,
+            "gst_rate_percent": str,
+            "gst_amount": str,
+            "total_amount": str,
+            "amount_paid": str,
+            "balance_due": str,
+            "ledger_entry_id": str,
+        },
+        "invoice_items": {
+            "invoice_item_id": str,
+            "invoice_id": str,
+            "quantity": str,
+            "unit_price": str,
+            "amount": str,
+            "revenue_account": str,
+            "revenue_account": str,
+        },
+        "invoice_payments": {
+            "payment_id": str,
+            "invoice_id": str,
+            "amount": str,
+            "ledger_entry_id": str,
+        },
+    }.get(table_name)
 
 
 def csv_row_count(path):
@@ -186,7 +276,6 @@ def main():
                 f"{sorted(missing_columns)}"
             )
 
-    # Preserve existing ORM schemas and create only missing tables.
     create_missing_tables(dictionary)
 
     metadata = MetaData()
@@ -197,6 +286,17 @@ def main():
 
     order = [name for name in PRIORITY if name in csv_tables]
     order.extend(sorted(set(csv_tables) - set(order)))
+    account_codes = set()
+    if "chart_of_accounts" in csv_tables:
+        account_codes = {
+            str(code)
+            for code in pd.read_csv(
+                csv_tables["chart_of_accounts"],
+                dtype={"account_code": str},
+                usecols=["account_code"],
+            )["account_code"]
+            if pd.notna(code)
+        }
 
     # Calculate expected counts before beginning the refresh.
     expected_counts = {
@@ -221,15 +321,29 @@ def main():
             table = tables[name]
             types = dictionary[name]
             manager_links = []
+            attendance_started = (
+                perf_counter() if name == "attendance" else None
+            )
 
-            for chunk in pd.read_csv(path, chunksize=CHUNK_SIZE):
+            for chunk in pd.read_csv(
+                path,
+                chunksize=CHUNK_SIZE,
+                dtype=csv_dtypes(name),
+            ):
                 records = []
 
                 for record in chunk.to_dict(orient="records"):
                     clean = {
-                        column: normalize_value(value, types[column])
+                        column: normalize_value(
+                            value, types[column], table_name=name
+                        )
                         for column, value in record.items()
                     }
+
+                    if name == "chart_of_accounts":
+                        clean["parent_code"] = normalize_account_parent_code(
+                            clean["parent_code"], account_codes
+                        )
 
                     # Employees refer to other employees as managers.
                     # Insert them first without manager links, then restore
@@ -265,6 +379,11 @@ def main():
                 )
 
             print(f"{name}: {loaded_rows} rows loaded")
+            if attendance_started is not None:
+                print(
+                    "Attendance load time: "
+                    f"{perf_counter() - attendance_started:.2f} seconds"
+                )
 
     # Verify persisted row counts after the transaction commits.
     with engine.connect() as connection:
