@@ -18,7 +18,7 @@ The project focuses on REST API development, relational database modelling, data
 | Migrations | Alembic |
 | Testing | Pytest |
 | Repository | [LedgerForge](https://github.com/Sudharsana27/LedgerForge) |
-| Phase tag | `phase-1` |
+| Release tags | `phase-1`, `phase-2`, `phase-3` |
 | Current task branch | `lf-05-salary-structures` |
 
 **Training project:** All company and business data used in LedgerForge is fictional and intended for educational purposes only.
@@ -196,7 +196,7 @@ independently derived or validated from the supplied source records.
 ### Source reconciliation versus payroll policy validation
 
 The independent investigation in
-[`artifacts/phase2/task7/source-data-investigation.md`](./artifacts/phase2/task7/source-data-investigation.md)
+[`phase-2/artifacts/task7/source-data-investigation.md`](./phase-2/artifacts/task7/source-data-investigation.md)
 compares source-derived fixed salary, attendance LOP, and capped overtime
 hours against the payroll reference. Fixed salary components reconstruct for
 7,339 rows with attendance; EMP-0566 / PR-2026-01 has no attendance record,
@@ -623,7 +623,7 @@ Verification against a disposable migrated SQLite database:
 - SQLite integrity check: `ok`; foreign-key check: zero violations.
 - Three independent April 2025 employee hand-counts: all metrics matched;
   details and reproduction method are in
-  [docs/LF-06-attendance-hand-check.md](./docs/LF-06-attendance-hand-check.md).
+  [phase-2/docs/LF-06-attendance-hand-check.md](./phase-2/docs/LF-06-attendance-hand-check.md).
 
 The tests and full seeder were run against temporary databases. The existing
 `ledgerforge.db` was not reset or overwritten.
@@ -664,39 +664,34 @@ Effective-date boundaries are important: the implementation and its tests should
 ```text
 05_Starter_Project/
 ├── app/
-│   ├── config.py
-│   ├── database.py
-│   ├── attendance_service.py
-│   ├── leave_service.py
-│   ├── payroll_service.py
-│   ├── main.py
-│   ├── models.py
-│   ├── schemas.py
-│   ├── salary_service.py
-│   └── routers/
-│       ├── attendance.py
-│       ├── departments.py
-│       ├── employees.py
-│       ├── leave.py
-│       ├── payroll.py
-│       └── salary.py
+├── alembic/
 ├── scripts/
 ├── tests/
-│   ├── test_attendance_leave.py
-│   ├── test_departments.py
-│   ├── test_employees.py
-│   ├── test_payroll.py
-│   └── test_salary.py
-├── alembic/
-├── docs/
-│   └── LF-06-attendance-hand-check.md
+├── phase-1/
+│   └── docs/
+│       ├── ER_DIAGRAM.md
+│       └── LF-03-check-report.txt
+├── phase-2/
+│   ├── docs/
+│   │   └── LF-06-attendance-hand-check.md
+│   └── artifacts/
+│       ├── task7/
+│       ├── task8/
+│       └── task10/
+├── phase-3/
+│   └── artifacts/
+│       ├── Python_Sudharsana_Phase3_Report.pdf
+│       ├── payroll_component_audit.csv
+│       └── payroll_component_audit_summary.json
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
 
-Some directories may contain additional files as development continues.
+The phase folders contain phase-specific documentation and evidence only.
+The integrated application, migrations, scripts, and tests remain at the
+repository root and are shared across phases.
 
 ## Development Guidelines
 
@@ -922,8 +917,8 @@ certify that policy.
   gross, or net pay. It flags two one-paisa overtime rounding differences,
   44 unresolved ESI eligibility conflicts, and the missing attendance for
   EMP-0566 / PR-2026-01. The report files are
-  `artifacts/phase3/payroll_component_audit.csv` and
-  `artifacts/phase3/payroll_component_audit_summary.json`.
+  `phase-3/artifacts/payroll_component_audit.csv` and
+  `phase-3/artifacts/payroll_component_audit_summary.json`.
 - The official Check 2 compared zero calculated rows against 7,340 expected
   rows and therefore did not pass. This does not invalidate the separate
   5/5 source-integrity checks or payroll-to-ledger monthly check.

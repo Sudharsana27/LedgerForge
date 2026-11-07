@@ -16,16 +16,16 @@ from reportlab.platypus import (
 )
 AUDIT_SUMMARY = (
     Path(__file__).resolve().parents[1]
+    / "phase-3"
     / "artifacts"
-    / "phase3"
     / "payroll_component_audit_summary.json"
 )
 
 
 OUTPUT = (
     Path(__file__).resolve().parents[1]
+    / "phase-3"
     / "artifacts"
-    / "phase3"
     / "Python_Sudharsana_Phase3_Report.pdf"
 )
 
