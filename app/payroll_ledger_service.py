@@ -368,107 +368,14 @@ def post_payroll_run(
         raise LedgerError(
             "post_payroll_run requires a Session with no active transaction."
         )
-    if not run_id.strip():
-        raise LedgerError("Payroll run ID cannot be empty.")
-    if not created_by.strip():
-        raise LedgerError("Payroll posting requires a created_by value.")
-
     try:
         with db.begin():
-            runs = _raw_table(db, "payroll_runs", RUN_COLUMNS)
-            items_table = _raw_table(db, "payroll_items", ITEM_COLUMNS)
-            run_rows = db.execute(
-                select(*runs.c).where(runs.c.run_id == run_id).limit(2)
-            ).mappings().all()
-            if not run_rows:
-                raise LedgerError(f"Payroll run {run_id} was not found.")
-            if len(run_rows) > 1:
-                raise LedgerError(f"Payroll run ID {run_id} is not unique.")
-            run = run_rows[0]
-
-            existing = _existing_payroll_entry(db, run_id)
-            linked_entry_id = run["journal_entry_id"]
-            if linked_entry_id:
-                linked = db.get(JournalEntry, linked_entry_id)
-                if linked is None:
-                    raise LedgerError(
-                        f"Payroll run {run_id} references missing journal "
-                        f"entry {linked_entry_id}."
-                    )
-                if (
-                    linked.source_type != "PAYROLL_RUN"
-                    or linked.source_id != run_id
-                    or linked.status != "POSTED"
-                ):
-                    raise LedgerError(
-                        f"Payroll run {run_id} references an unrelated or "
-                        "unposted journal entry."
-                    )
-                if existing is not None and existing.entry_id != linked.entry_id:
-                    raise LedgerError(
-                        f"Payroll run {run_id} has conflicting journal "
-                        "references."
-                    )
-                return linked
-            if existing is not None:
-                db.execute(
-                    update(runs)
-                    .where(runs.c.run_id == run_id)
-                    .values(journal_entry_id=existing.entry_id)
-                )
-                return existing
-
-            if str(run["status"]).upper() not in {"APPROVED", "PAID"}:
-                raise LedgerError(
-                    f"Payroll run {run_id} is not approved for posting."
-                )
-
-            period_start = _date(run["period_start"], field="period_start")
-            period_end = _date(run["period_end"], field="period_end")
-            pay_date = _date(run["pay_date"], field="pay_date")
-            if period_start > period_end or pay_date < period_end:
-                raise LedgerError(
-                    f"Payroll run {run_id} has an invalid period or pay date."
-                )
-            if (
-                period_start.year != period_end.year
-                or period_start.month != period_end.month
-                or period_start.day != 1
-                or period_end.day
-                != calendar.monthrange(period_end.year, period_end.month)[1]
-            ):
-                raise LedgerError(
-                    f"Payroll run {run_id} must cover one full calendar month."
-                )
-
-            item_rows = _run_items(db, items_table, run_id)
-            _verify_run_totals(run, item_rows)
-            lines = _journal_lines(run_id, item_rows)
-            _validate_payroll_accounts(db, lines)
-            entry_id, _digest = _entry_ids(run_id)
-            entry = JournalEntryInput(
-                entry_id=entry_id,
-                entry_date=pay_date,
-                posting_period=f"{period_start:%Y-%m}",
-                financial_year=_fiscal_year(pay_date),
-                description=f"Payroll posting {run_id}",
-                source_type="PAYROLL_RUN",
-                source_id=run_id,
-                created_by=created_by,
-                created_at=created_at or datetime.now(),
-            )
-            posted = create_journal_entry_in_transaction(
+            return post_payroll_run_in_transaction(
                 db,
-                entry,
-                lines,
+                run_id,
+                created_by=created_by,
+                created_at=created_at,
             )
-            db.execute(
-                update(runs)
-                .where(runs.c.run_id == run_id)
-                .values(journal_entry_id=posted.entry_id)
-            )
-            db.flush()
-            return posted
     except IntegrityError as exc:
         existing = _existing_payroll_entry(db, run_id)
         if existing is not None:
@@ -477,3 +384,115 @@ def post_payroll_run(
             f"Payroll run {run_id} could not be posted because a database "
             f"constraint was violated: {exc.orig}"
         ) from exc
+
+
+def post_payroll_run_in_transaction(
+    db: Session,
+    run_id: str,
+    *,
+    created_by: str,
+    created_at: datetime | None = None,
+) -> JournalEntry:
+    """Post one approved payroll run within its caller's transaction."""
+    if not db.in_transaction():
+        raise LedgerError(
+            "post_payroll_run_in_transaction requires an active transaction."
+        )
+    if not run_id.strip():
+        raise LedgerError("Payroll run ID cannot be empty.")
+    if not created_by.strip():
+        raise LedgerError("Payroll posting requires a created_by value.")
+
+    runs = _raw_table(db, "payroll_runs", RUN_COLUMNS)
+    items_table = _raw_table(db, "payroll_items", ITEM_COLUMNS)
+    run_rows = db.execute(
+        select(*runs.c).where(runs.c.run_id == run_id).limit(2)
+    ).mappings().all()
+    if not run_rows:
+        raise LedgerError(f"Payroll run {run_id} was not found.")
+    if len(run_rows) > 1:
+        raise LedgerError(f"Payroll run ID {run_id} is not unique.")
+    run = run_rows[0]
+
+    existing = _existing_payroll_entry(db, run_id)
+    linked_entry_id = run["journal_entry_id"]
+    if linked_entry_id:
+        linked = db.get(JournalEntry, linked_entry_id)
+        if linked is None:
+            raise LedgerError(
+                f"Payroll run {run_id} references missing journal "
+                f"entry {linked_entry_id}."
+            )
+        if (
+            linked.source_type != "PAYROLL_RUN"
+            or linked.source_id != run_id
+            or linked.status != "POSTED"
+        ):
+            raise LedgerError(
+                f"Payroll run {run_id} references an unrelated or "
+                "unposted journal entry."
+            )
+        if existing is not None and existing.entry_id != linked.entry_id:
+            raise LedgerError(
+                f"Payroll run {run_id} has conflicting journal references."
+            )
+        return linked
+    if existing is not None:
+        db.execute(
+            update(runs)
+            .where(runs.c.run_id == run_id)
+            .values(journal_entry_id=existing.entry_id)
+        )
+        return existing
+
+    if str(run["status"]).upper() not in {"APPROVED", "PAID"}:
+        raise LedgerError(
+            f"Payroll run {run_id} is not approved for posting."
+        )
+
+    period_start = _date(run["period_start"], field="period_start")
+    period_end = _date(run["period_end"], field="period_end")
+    pay_date = _date(run["pay_date"], field="pay_date")
+    if period_start > period_end or pay_date < period_end:
+        raise LedgerError(
+            f"Payroll run {run_id} has an invalid period or pay date."
+        )
+    if (
+        period_start.year != period_end.year
+        or period_start.month != period_end.month
+        or period_start.day != 1
+        or period_end.day
+        != calendar.monthrange(period_end.year, period_end.month)[1]
+    ):
+        raise LedgerError(
+            f"Payroll run {run_id} must cover one full calendar month."
+        )
+
+    item_rows = _run_items(db, items_table, run_id)
+    _verify_run_totals(run, item_rows)
+    lines = _journal_lines(run_id, item_rows)
+    _validate_payroll_accounts(db, lines)
+    entry_id, _digest = _entry_ids(run_id)
+    entry = JournalEntryInput(
+        entry_id=entry_id,
+        entry_date=pay_date,
+        posting_period=f"{period_start:%Y-%m}",
+        financial_year=_fiscal_year(pay_date),
+        description=f"Payroll posting {run_id}",
+        source_type="PAYROLL_RUN",
+        source_id=run_id,
+        created_by=created_by,
+        created_at=created_at or datetime.now(),
+    )
+    posted = create_journal_entry_in_transaction(
+        db,
+        entry,
+        lines,
+    )
+    db.execute(
+        update(runs)
+        .where(runs.c.run_id == run_id)
+        .values(journal_entry_id=posted.entry_id)
+    )
+    db.flush()
+    return posted

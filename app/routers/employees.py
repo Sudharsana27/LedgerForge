@@ -6,6 +6,11 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..auth import (
+    AuthenticatedPrincipal,
+    get_authenticated_principal,
+    require_roles,
+)
 from ..database import get_db
 from ..models import Department, Employee, Role
 from ..schemas import EmployeeCreate, EmployeeOut, EmployeeUpdate
@@ -43,12 +48,20 @@ def validate_references(
             raise HTTPException(422, "Manager does not exist")
 
 
+def _require_manager(principal: AuthenticatedPrincipal) -> None:
+    if principal.role not in {"ADMIN", "HR"}:
+        raise HTTPException(403, "Employee management access denied")
+
+
 @router.get("", response_model=list[EmployeeOut])
 def list_employees(
     q: str | None = None,
     department_id: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     query = db.query(Employee)
@@ -76,7 +89,16 @@ def list_employees(
 
 
 @router.get("/{employee_id}", response_model=EmployeeOut)
-def get_employee(employee_id: str, db: Session = Depends(get_db)):
+def get_employee(
+    employee_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
+    db: Session = Depends(get_db),
+):
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and principal.employee_id != employee_id
+    ):
+        raise HTTPException(403, "Employee data access denied")
     employee = db.get(Employee, employee_id)
 
     if not employee:
@@ -88,6 +110,9 @@ def get_employee(employee_id: str, db: Session = Depends(get_db)):
 @router.post("", response_model=EmployeeOut, status_code=201)
 def create_employee(
     employee_data: EmployeeCreate,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     data = employee_data.model_dump()
@@ -127,6 +152,9 @@ def create_employee(
 def update_employee(
     employee_id: str,
     employee_data: EmployeeUpdate,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     employee = db.get(Employee, employee_id)
@@ -174,6 +202,9 @@ def update_employee(
 @router.delete("/{employee_id}", response_model=EmployeeOut)
 def soft_delete_employee(
     employee_id: str,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     employee = db.get(Employee, employee_id)
@@ -192,6 +223,9 @@ def soft_delete_employee(
 @router.get("/{employee_id}/team", response_model=list[EmployeeOut])
 def get_employee_team(
     employee_id: str,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     employee = db.get(Employee, employee_id)

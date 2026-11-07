@@ -195,7 +195,15 @@ def payslip_client(tmp_path):
         autoflush=False,
         autocommit=False,
     )
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            table
+            for table in Base.metadata.sorted_tables
+            if table.name
+            not in {"payroll_runs", "payroll_items", "statutory_rates"}
+        ],
+    )
 
     runs = Table(
         "payroll_runs",
@@ -425,10 +433,22 @@ def payslip_client(tmp_path):
         yield TestClient(app), session_factory, source_items
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(engine)
-        runs.drop(engine)
-        items.drop(engine)
-        rates.drop(engine)
+        Base.metadata.drop_all(
+            engine,
+            tables=[
+                table
+                for table in Base.metadata.sorted_tables
+                if table.name
+                not in {
+                    "payroll_runs",
+                    "payroll_items",
+                    "statutory_rates",
+                }
+            ],
+        )
+        runs.drop(engine, checkfirst=True)
+        items.drop(engine, checkfirst=True)
+        rates.drop(engine, checkfirst=True)
         engine.dispose()
 
 

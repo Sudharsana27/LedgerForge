@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..auth import AuthenticatedPrincipal, get_authenticated_principal
+from ..auth import require_roles
 from ..database import get_db
 from ..receivables_service import (
     ReceivablesError,
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/receivables", tags=["receivables"])
 @router.get(
     "",
     response_model=ReceivablesReportOut,
-    dependencies=[Depends(get_authenticated_principal)],
+    dependencies=[Depends(require_roles("ADMIN", "HR"))],
 )
 def get_receivables(
     client_id: str | None = Query(default=None, min_length=1, max_length=20),

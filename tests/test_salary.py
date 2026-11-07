@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth import AuthenticatedPrincipal, get_authenticated_principal
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -96,6 +97,13 @@ def setup_db():
             session.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_authenticated_principal] = lambda: (
+        AuthenticatedPrincipal(
+            employee_id="T1",
+            role="HR",
+            user_id="U-HR",
+        )
+    )
     yield TestingSession
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)

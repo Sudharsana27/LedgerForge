@@ -6,6 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..auth import (
+    AuthenticatedPrincipal,
+    get_authenticated_principal,
+    require_roles,
+)
 from ..database import get_db
 from ..salary_service import (
     get_revision_history,
@@ -59,8 +64,14 @@ def revision_output(row):
 def employee_structure(
     employee_id: str,
     on_date: date,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ):
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and principal.employee_id != employee_id
+    ):
+        raise HTTPException(403, "Salary data access denied")
     try:
         rows = get_structure(db, employee_id, on_date)
     except ValueError as exc:
@@ -88,8 +99,14 @@ def employee_structure(
 @router.get("/employees/{employee_id}/revisions")
 def employee_revisions(
     employee_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ):
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and principal.employee_id != employee_id
+    ):
+        raise HTTPException(403, "Salary data access denied")
     try:
         rows = get_revision_history(db, employee_id)
     except ValueError as exc:
@@ -101,6 +118,9 @@ def employee_revisions(
 @router.post("/revisions", status_code=201)
 def create_salary_revision(
     payload: SalaryRevisionInput,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     try:

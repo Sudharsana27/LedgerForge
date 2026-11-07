@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth import AuthenticatedPrincipal, get_authenticated_principal
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
@@ -309,6 +310,13 @@ def client(test_database):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_authenticated_principal] = lambda: (
+        AuthenticatedPrincipal(
+            employee_id="EMP-0004",
+            role="HR",
+            user_id="U-TEST-HR",
+        )
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

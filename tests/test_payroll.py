@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.auth import AuthenticatedPrincipal, get_authenticated_principal
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -62,7 +63,7 @@ def payroll_client():
         Column("note", String, nullable=False),
         Column("effective_from", Date, nullable=False),
     )
-    rates.create(engine)
+    rates.create(engine, checkfirst=True)
 
     with engine.begin() as connection:
         for parameter, value in {
@@ -247,12 +248,19 @@ def payroll_client():
             session.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_authenticated_principal] = lambda: (
+        AuthenticatedPrincipal(
+            employee_id="T1",
+            role="HR",
+            user_id="U-HR",
+        )
+    )
     try:
         yield TestClient(app), testing_session
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)
-        rates.drop(engine)
+        rates.drop(engine, checkfirst=True)
         engine.dispose()
 
 

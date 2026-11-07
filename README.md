@@ -791,6 +791,108 @@ that export's ledger, payroll, receivables, employee, and termination-date
 data; it is not a substitute for application API tests or a fresh database
 import.
 
+## Phase 3 — Security, Payroll Workflow, Tax, and Reporting
+
+### Authentication and access
+
+All API routes except `GET /health` and `POST /auth/login` require a bearer
+access token. Login tokens expire after 30 minutes. Passwords are stored as
+bcrypt hashes; the CSV user source contains no passwords, so provision each
+active account locally with:
+
+```powershell
+python -m scripts.set_user_password --username admin@example.test
+```
+
+Use `--reset` only when intentionally replacing an existing password. The
+password is entered interactively and is never accepted as a command-line
+argument. Configure a unique secret of at least 32 bytes in the local `.env`
+file before starting the API:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Do not commit the generated secret. ADMIN and HR users can access finance,
+employee-management, payroll, expense, tax, and statutory-report routes.
+Only ADMIN can create a future tax-slab version. Employees can view their own
+employee, salary, attendance, leave, and payslip records; HR can view those
+records for the organization. ADMIN is not implicitly granted HR-only
+payslip access.
+
+| Route / operation | Admin | HR | Employee |
+|---|---|---|---|
+| `/health`, `/auth/login` | Public | Public | Public |
+| Department listing | Allow | Allow | Deny |
+| Employee list/create/update/team | Allow | Allow | Deny |
+| Employee detail | Any employee | Any employee | Own record only |
+| Salary, attendance, leave | Any employee; approval/config actions as permitted | Any employee; approval/config actions as permitted | Own records only |
+| Payroll calculate/create/process/approve/pay/reverse | Allow | Allow | Deny |
+| Payslips | Own record only | Any employee | Own record only |
+| Clients, invoices, receivables, expenses, vendors | Allow | Allow | Deny |
+| Financial and statutory reports, tax calculation/slab listing | Allow | Allow | Deny |
+| Tax slab version changes | Allow | Deny | Deny |
+
+### Payroll lifecycle
+
+`POST /payroll/runs` calculates and saves a DRAFT run from explicit employee
+inputs. Idempotency keys are checked against the persisted request contents;
+reusing a key with changed inputs is rejected. A period can have only one
+non-reversed run. The state transition endpoints are:
+
+1. `POST /payroll/runs/{run_id}/process` replays each saved item through the
+   payroll calculation engine and checks all totals.
+2. `POST /payroll/runs/{run_id}/approve` requires a different user from the
+   run creator and atomically posts the balanced payroll journal.
+3. `POST /payroll/runs/{run_id}/pay` records net-pay disbursement.
+4. `POST /payroll/runs/{run_id}/reverse` posts reversing entries for both
+   payroll and any recorded payment. Repeated post, pay, and reversal requests
+   are idempotent.
+
+The supplied source set has no independent `payroll_inputs.csv`; variable
+pay, TDS, and other deductions cannot be independently reconstructed for all
+18 historical runs. The database already contains those historical payroll
+items and ledger postings, but that is not an independent calculation. The
+engine therefore requires explicit inputs and reports source-policy
+inconsistencies rather than manufacturing a payroll-checker export.
+
+### Expenses, tax, and financial reports
+
+Vendor bills follow `SUBMITTED → APPROVED → PAID`, with submitter/approver
+separation, duplicate bill detection, and balanced journal postings for
+approval and payment. Financial reports are calculated from posted ledger
+entries: `GET /reports/trial-balance`, `/reports/profit-and-loss`, and
+`/reports/balance-sheet`. The trial-balance export can be generated with
+`python -m scripts.export_trial_balance --output-file <new-file.csv>`.
+
+Tax slabs are versioned using effective dates and each update is audited.
+Statutory reports sum saved payroll items. The supplied tax and statutory
+parameters are marked sample/training data; the calculation response exposes
+that condition, and these outputs must not be treated as approved tax advice
+or production compliance.
+
+### Phase 3 validation record
+
+- Official source checks passed 5/5; the trial-balance export matched all 40
+  official account balances with no discrepancies.
+- The expense reconciliation compared 501 source bills over 18 months and
+  found no monthly or vendor-month mismatches.
+- The complete regression and Phase 3 test suite passed 177 tests.
+- Official source summary: revenue 1,260,930,052.00; expenses
+  1,036,246,464.42; profit 224,683,587.58; 18 payroll runs; employer cost
+  861,586,392.42.
+- The independent payroll batch processed 7,340 rows across 18 runs but
+  skipped all rows because the independent variable-pay, TDS, and
+  other-deduction inputs are absent. Payroll totals were not independently
+  certified; no reference-value export was substituted for a calculation.
+
+The additive migration is `a390f1b6d2e8`. Fresh databases can use
+`alembic upgrade head`. The supplied seeded SQLite database has a legacy
+revision marker despite containing later baseline tables; back it up and
+verify the schema before adopting it at `e7c2d10f4b39` and upgrading. This
+migration is intentionally non-reversible because it adds financial history
+and credentials.
+
 ## Training Roadmap
 
 | Milestones | Scope |
@@ -807,15 +909,11 @@ import.
 
 ## Current Development Status
 
-The project has progressed beyond its original starter application. The branch
-recorded for the preceding milestone is `lf-05-salary-structures`, which
-contains the salary structure and revision API work.
-
-The recorded verification run for the salary, department, and employee test
-suites completed with 16 passing tests. LF-06 attendance and leave, LF-07
-payroll calculation, LF-08 payslip generation, LF-09 double-entry ledger, and
-LF-10 invoices, payments, and receivables are implemented in this checkout.
-Expenses, broader reporting, and deployment remain later milestones.
+The project has progressed through Phase 3 on branch
+`lf-05-salary-structures`. Earlier phases retain employee, salary, attendance,
+leave, payroll-calculation, payslip, accounting-ledger, and receivables
+functionality. Phase 3 adds authentication and role checks, payroll lifecycle
+operations, expense workflows, tax/statutory reporting, and financial reports.
 
 ## Learning Outcomes
 

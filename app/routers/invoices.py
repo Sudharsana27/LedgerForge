@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..auth import AuthenticatedPrincipal, get_authenticated_principal
+from ..auth import AuthenticatedPrincipal, get_authenticated_principal, require_roles
 from ..database import get_db
 from ..invoice_service import (
     DraftInvoiceInput,
@@ -32,7 +32,11 @@ from ..schemas import (
 )
 
 
-router = APIRouter(prefix="/invoices", tags=["invoices"])
+router = APIRouter(
+    prefix="/invoices",
+    tags=["invoices"],
+    dependencies=[Depends(require_roles("ADMIN", "HR"))],
+)
 
 
 def _service_error(exc: InvoiceServiceError) -> HTTPException:

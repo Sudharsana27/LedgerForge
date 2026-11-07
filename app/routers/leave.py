@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..auth import (
+    AuthenticatedPrincipal,
+    get_authenticated_principal,
+    require_roles,
+)
 from ..database import get_db
 from ..leave_service import (
     LeaveError,
@@ -25,7 +30,10 @@ router = APIRouter(prefix="/leave", tags=["leave"])
 
 
 @router.get("/types", response_model=list[LeaveTypeOut])
-def get_leave_types(db: Session = Depends(get_db)):
+def get_leave_types(
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
+    db: Session = Depends(get_db),
+):
     return list_leave_types(db)
 
 
@@ -35,8 +43,14 @@ def get_leave_types(db: Session = Depends(get_db)):
 )
 def employee_leave_balances(
     employee_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ):
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and principal.employee_id != employee_id
+    ):
+        raise HTTPException(403, "Leave balance access denied")
     try:
         return list_leave_balances(db, employee_id)
     except LeaveError as exc:
@@ -47,8 +61,13 @@ def employee_leave_balances(
 def get_leave_requests(
     employee_id: str | None = None,
     status: str | None = None,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ):
+    if principal.role not in {"ADMIN", "HR"}:
+        if employee_id is not None and employee_id != principal.employee_id:
+            raise HTTPException(403, "Leave request access denied")
+        employee_id = principal.employee_id
     if employee_id is not None and db.get(Employee, employee_id) is None:
         raise HTTPException(404, "Employee not found")
     return list_leave_requests(
@@ -63,8 +82,14 @@ def get_leave_requests(
 )
 def create_leave_request(
     payload: LeaveRequestCreate,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ):
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and payload.employee_id != principal.employee_id
+    ):
+        raise HTTPException(403, "Leave request access denied")
     try:
         return apply_for_leave(db, **payload.model_dump())
     except LeaveError as exc:
@@ -75,11 +100,21 @@ def create_leave_request(
     "/requests/{request_id}",
     response_model=LeaveRequestOut,
 )
-def get_request(request_id: str, db: Session = Depends(get_db)):
+def get_request(
+    request_id: str,
+    principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
+    db: Session = Depends(get_db),
+):
     try:
-        return get_leave_request(db, request_id)
+        request = get_leave_request(db, request_id)
     except LeaveError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
+    if (
+        principal.role not in {"ADMIN", "HR"}
+        and request.employee_id != principal.employee_id
+    ):
+        raise HTTPException(403, "Leave request access denied")
+    return request
 
 
 @router.post(
@@ -89,13 +124,16 @@ def get_request(request_id: str, db: Session = Depends(get_db)):
 def approve_request(
     request_id: str,
     payload: LeaveDecisionInput | None = None,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     try:
         return approve_leave(
             db,
             request_id,
-            approver_id=payload.approver_id if payload else None,
+            approver_id=principal.employee_id,
         )
     except LeaveError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -108,13 +146,16 @@ def approve_request(
 def reject_request(
     request_id: str,
     payload: LeaveDecisionInput | None = None,
+    principal: AuthenticatedPrincipal = Depends(
+        require_roles("ADMIN", "HR")
+    ),
     db: Session = Depends(get_db),
 ):
     try:
         return reject_leave(
             db,
             request_id,
-            approver_id=payload.approver_id if payload else None,
+            approver_id=principal.employee_id,
         )
     except LeaveError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc

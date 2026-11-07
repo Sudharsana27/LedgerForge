@@ -47,7 +47,14 @@ def ledger_db(tmp_path):
     def enable_foreign_keys(connection, _record):
         connection.execute("PRAGMA foreign_keys=ON")
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            table
+            for table in Base.metadata.sorted_tables
+            if table.name not in {"payroll_runs", "payroll_items"}
+        ],
+    )
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     db = session_factory()
     db.add_all(

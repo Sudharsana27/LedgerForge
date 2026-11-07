@@ -40,7 +40,10 @@ def get_payslip(
     principal: AuthenticatedPrincipal = Depends(get_authenticated_principal),
     db: Session = Depends(get_db),
 ) -> Response:
-    if principal.role != "HR" and principal.employee_id != employee_id:
+    if (
+        principal.role != "HR"
+        and principal.employee_id != employee_id
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Payslip access denied",

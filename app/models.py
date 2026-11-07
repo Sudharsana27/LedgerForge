@@ -801,6 +801,427 @@ class InvoicePayment(Base):
     )
 
 
+class Vendor(Base):
+    __tablename__ = "vendors"
+
+    vendor_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    vendor_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    primary_expense_account: Mapped[str] = mapped_column(
+        ForeignKey("chart_of_accounts.account_code"), nullable=False
+    )
+    payment_terms_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+    gst_registration: Mapped[str | None] = mapped_column(
+        String(30), nullable=True
+    )
+    is_active: Mapped[str] = mapped_column(String(1), nullable=False)
+
+    primary_expense: Mapped[ChartOfAccount] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "payment_terms_days >= 0",
+            name="ck_vendors_nonnegative_payment_terms",
+        ),
+        CheckConstraint(
+            "is_active IN ('Y', 'N')",
+            name="ck_vendors_active_flag",
+        ),
+        Index("ix_vendors_vendor_name", "vendor_name"),
+    )
+
+
+class ExpenseBill(Base):
+    __tablename__ = "expenses"
+
+    expense_id: Mapped[str] = mapped_column(String(30), primary_key=True)
+    expense_date: Mapped[date] = mapped_column(Date, nullable=False)
+    category_account: Mapped[str] = mapped_column(
+        ForeignKey("chart_of_accounts.account_code"), nullable=False
+    )
+    vendor_id: Mapped[str] = mapped_column(
+        ForeignKey("vendors.vendor_id"), nullable=False
+    )
+    bill_reference: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    department_id: Mapped[str] = mapped_column(
+        ForeignKey("departments.department_id"), nullable=False
+    )
+    amount_excl_gst: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    gst_rate_percent: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False
+    )
+    gst_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    paid_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    payment_mode: Mapped[str | None] = mapped_column(
+        String(30), nullable=True
+    )
+    submitted_by: Mapped[str] = mapped_column(
+        ForeignKey("employees.employee_id"), nullable=False
+    )
+    approved_by: Mapped[str | None] = mapped_column(
+        ForeignKey("employees.employee_id"), nullable=True
+    )
+    ledger_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_entries.entry_id"), nullable=True
+    )
+    payment_ledger_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_entries.entry_id"), nullable=True
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    duplicate_key: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True
+    )
+
+    vendor: Mapped[Vendor] = relationship()
+    expense_account: Mapped[ChartOfAccount] = relationship(
+        foreign_keys=[category_account]
+    )
+    ledger_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[ledger_entry_id]
+    )
+    payment_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[payment_ledger_entry_id]
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "amount_excl_gst >= 0 AND gst_rate_percent >= 0 "
+            "AND gst_amount >= 0 AND total_amount = amount_excl_gst + gst_amount",
+            name="ck_expenses_amounts_reconcile",
+        ),
+        CheckConstraint(
+            "due_date >= expense_date",
+            name="ck_expenses_due_date",
+        ),
+        CheckConstraint(
+            "status IN ('SUBMITTED', 'APPROVED', 'PAID', 'UNPAID')",
+            name="ck_expenses_workflow_status",
+        ),
+        Index("ix_expenses_vendor_date", "vendor_id", "expense_date"),
+        Index("ix_expenses_status_date", "status", "expense_date"),
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    employee_id: Mapped[str] = mapped_column(
+        ForeignKey("employees.employee_id"), nullable=False, unique=True
+    )
+    username: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[str] = mapped_column(String(1), nullable=False)
+    mfa_enabled: Mapped[str] = mapped_column(String(1), nullable=False)
+    last_login_at: Mapped[str | None] = mapped_column(
+        String(30), nullable=True
+    )
+    created_at: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    password_policy_note: Mapped[str | None] = mapped_column(
+        String(300), nullable=True
+    )
+    password_hash: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    employee: Mapped[Employee] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('ADMIN', 'HR', 'EMPLOYEE')",
+            name="ck_users_role",
+        ),
+        CheckConstraint(
+            "is_active IN ('Y', 'N')",
+            name="ck_users_active_flag",
+        ),
+        Index("ix_users_employee_id", "employee_id"),
+    )
+
+
+class PayrollRun(Base):
+    __tablename__ = "payroll_runs"
+
+    run_id: Mapped[str] = mapped_column(String(30), primary_key=True)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    pay_date: Mapped[date] = mapped_column(Date, nullable=False)
+    employees_paid: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_gross: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    total_deductions: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    total_net: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    total_employer_contributions: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    total_employer_cost: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    run_by: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False
+    )
+    approved_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, unique=True
+    )
+    journal_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_entries.entry_id"), nullable=True, unique=True
+    )
+    calculation_version: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
+    processed_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id"), nullable=True
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    payment_journal_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_entries.entry_id"), nullable=True, unique=True
+    )
+    paid_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id"), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    reversal_journal_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("journal_entries.entry_id"), nullable=True, unique=True
+    )
+    reversed_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.user_id"), nullable=True
+    )
+    reversed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+
+    journal_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[journal_entry_id]
+    )
+    payment_journal_entry: Mapped[JournalEntry | None] = relationship(
+        foreign_keys=[payment_journal_entry_id]
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "period_start <= period_end",
+            name="ck_payroll_runs_date_range",
+        ),
+        CheckConstraint(
+            "status IN ('DRAFT', 'PROCESSED', 'APPROVED', 'PAID', "
+            "'POSTED - PAYMENT PENDING', 'REVERSED')",
+            name="ck_payroll_runs_status",
+        ),
+        Index("ix_payroll_runs_period", "period_start", "period_end"),
+    )
+
+
+class PayrollItem(Base):
+    __tablename__ = "payroll_items"
+
+    payroll_item_id: Mapped[str] = mapped_column(
+        String(30), primary_key=True
+    )
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("payroll_runs.run_id"), nullable=False
+    )
+    employee_id: Mapped[str] = mapped_column(
+        ForeignKey("employees.employee_id"), nullable=False
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    department_id: Mapped[str] = mapped_column(
+        ForeignKey("departments.department_id"), nullable=False
+    )
+    role_id: Mapped[str] = mapped_column(
+        ForeignKey("roles.role_id"), nullable=False
+    )
+    calendar_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    days_employed: Mapped[int] = mapped_column(Integer, nullable=False)
+    lop_days: Mapped[Decimal] = mapped_column(Numeric(7, 2), nullable=False)
+    payable_days: Mapped[Decimal] = mapped_column(
+        Numeric(7, 2), nullable=False
+    )
+    monthly_fixed_gross: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    basic: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    hra: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    conveyance: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    medical: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    special_allowance: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    earned_fixed_pay: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    overtime_hours_paid: Mapped[Decimal] = mapped_column(
+        Numeric(7, 2), nullable=False
+    )
+    overtime_pay: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    variable_pay: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    variable_pay_type: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    gross_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    pf_employee: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    esi_employee: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    professional_tax: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    tds: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    other_deductions: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    total_deductions: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    net_pay: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    pf_employer: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    esi_employer: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    employer_cost: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    calculation_note: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "employee_id",
+            name="uq_payroll_items_run_employee",
+        ),
+        CheckConstraint(
+            "period_start <= period_end",
+            name="ck_payroll_items_period",
+        ),
+        Index("ix_payroll_items_employee_period", "employee_id", "period_start"),
+    )
+
+
+class TaxSlab(Base):
+    __tablename__ = "tax_slabs"
+
+    slab_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    regime: Mapped[str] = mapped_column(String(20), nullable=False)
+    financial_year: Mapped[str] = mapped_column(String(20), nullable=False)
+    income_from: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False
+    )
+    income_to: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
+    rate_percent: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False
+    )
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "income_from >= 0 AND rate_percent >= 0 "
+            "AND (income_to IS NULL OR income_to > income_from)",
+            name="ck_tax_slabs_valid_range",
+        ),
+        UniqueConstraint(
+            "regime",
+            "financial_year",
+            "income_from",
+            "effective_from",
+            name="uq_tax_slab_effective_version",
+        ),
+        Index(
+            "ix_tax_slabs_regime_year_effective",
+            "regime",
+            "financial_year",
+            "effective_from",
+        ),
+    )
+
+
+class TaxParameter(Base):
+    __tablename__ = "tax_parameters"
+
+    parameter: Mapped[str] = mapped_column(String(100), primary_key=True)
+    effective_from: Mapped[date | None] = mapped_column(
+        Date, primary_key=True, nullable=True
+    )
+    value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class StatutoryRate(Base):
+    __tablename__ = "statutory_rates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    parameter: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    unit: Mapped[str] = mapped_column(String(100), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class TaxSlabAudit(Base):
+    __tablename__ = "tax_slab_audits"
+
+    audit_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    slab_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    previous_rate_percent: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False
+    )
+    new_rate_percent: Mapped[Decimal] = mapped_column(
+        Numeric(7, 4), nullable=False
+    )
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    changed_by: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 @event.listens_for(Session, "before_flush")
 def _prevent_posted_journal_mutations(session, _flush_context, _instances):
     for instance in session.new:
