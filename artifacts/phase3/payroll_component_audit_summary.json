@@ -1,0 +1,241 @@
+{
+  "status": "PARTIAL RECONCILIATION — NOT A COMPLETE CHECK 2 PASS",
+  "complete_check_2_pass": false,
+  "payroll_items_used_as_calculation_input": false,
+  "source_files": [
+    "employees.csv",
+    "payroll_runs.csv",
+    "salary_revisions.csv",
+    "salary_structures.csv",
+    "salary_components.csv",
+    "attendance.csv",
+    "employee_assignments.csv",
+    "roles.csv",
+    "statutory_rates.csv"
+  ],
+  "comparison_only_file": "payroll_items.csv",
+  "source_employee_run_rows": 7340,
+  "comparison_reference_rows": 7340,
+  "reference_rows_without_source_employee_run": 0,
+  "fixed_component_rows_calculated": 7339,
+  "fixed_component_reference_matches": 7339,
+  "attendance_unavailable_rows": 1,
+  "lop_source_rows_calculated": 7339,
+  "lop_reference_matches": 7339,
+  "overtime_hours_source_rows_calculated": 7339,
+  "overtime_hours_reference_matches": 7339,
+  "overtime_pay_calculated_rows": 7339,
+  "overtime_pay_reference_matches": 7337,
+  "overtime_rounding_difference_rows": [
+    {
+      "employee_id": "EMP-0307",
+      "run_id": "PR-2025-11",
+      "calculated": "4898.63",
+      "reference": "4898.62",
+      "unrounded": "4898.625"
+    },
+    {
+      "employee_id": "EMP-0535",
+      "run_id": "PR-2026-07",
+      "calculated": "6361.13",
+      "reference": "6361.12",
+      "unrounded": "6361.125"
+    }
+  ],
+  "pf_employee_calculated_rows": 7340,
+  "pf_employee_reference_matches": 7340,
+  "pf_employer_calculated_rows": 7340,
+  "pf_employer_reference_matches": 7340,
+  "unresolved_esi_conflict_rows": 44,
+  "unresolved_esi_conflict_employee_runs": [
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-04"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-04"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-04"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-05"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-05"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-05"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-06"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-06"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-06"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-07"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-07"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-07"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-08"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-08"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-08"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2025-08"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-09"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-09"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-09"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2025-09"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-10"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-10"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-10"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2025-10"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-11"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-11"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-11"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2025-11"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2025-12"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2025-12"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2025-12"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2025-12"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2026-01"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2026-01"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2026-01"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2026-01"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2026-02"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2026-02"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2026-02"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2026-02"
+    },
+    {
+      "employee_id": "EMP-0131",
+      "run_id": "PR-2026-03"
+    },
+    {
+      "employee_id": "EMP-0137",
+      "run_id": "PR-2026-03"
+    },
+    {
+      "employee_id": "EMP-0481",
+      "run_id": "PR-2026-03"
+    },
+    {
+      "employee_id": "EMP-0633",
+      "run_id": "PR-2026-03"
+    }
+  ],
+  "not_independently_reconciled": [
+    "variable pay",
+    "TDS",
+    "other deductions",
+    "complete gross pay",
+    "complete total deductions",
+    "net pay",
+    "legal correctness of sample statutory rates"
+  ],
+  "outputs": {
+    "component_audit_csv": "artifacts\\phase3\\payroll_component_audit.csv",
+    "summary_json": "artifacts\\phase3\\payroll_component_audit_summary.json"
+  }
+}

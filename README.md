@@ -124,7 +124,7 @@ The supported formulas follow the source data:
   Independent reconstruction from employee hire/exit dates, effective salary
   revisions and structures, and attendance matches the five fixed component
   amounts, monthly fixed gross, earned fixed pay, LOP days, and capped
-  overtime hours on all 7,340 payroll rows. These are source-data
+  overtime hours on all 7,339 rows with attendance. These are source-data
   reconciliations, not approval of payroll policy or validation of all
   payroll-item totals.
 
@@ -198,13 +198,16 @@ independently derived or validated from the supplied source records.
 The independent investigation in
 [`artifacts/phase2/task7/source-data-investigation.md`](./artifacts/phase2/task7/source-data-investigation.md)
 compares source-derived fixed salary, attendance LOP, and capped overtime
-hours against the payroll reference. All 7,340 rows match those source-derived
-components/hours, and summing the payroll items agrees exactly with all 18
-`payroll_runs.csv` aggregates. These checks show consistency between the
-available source records and reference totals; they do not prove that the
-reference's variable pay, TDS, other deductions, or sample statutory rules
-are correct or approved. A complete independent calculation or full 7,340-row
-payroll validation is not claimed.
+hours against the payroll reference. Fixed salary components reconstruct for
+7,339 rows with attendance; EMP-0566 / PR-2026-01 has no attendance record,
+so attendance-dependent values are unavailable. The 7,339 available
+attendance records match LOP and capped overtime hours. Overtime pay has two
+one-paisa half-cent rounding differences. Summing payroll items agrees
+exactly with all 18 `payroll_runs.csv` aggregates. These checks show
+consistency for the available source records; they do not prove that variable
+pay, TDS, other deductions, or sample statutory rules are correct or
+approved. A complete independent calculation or full 7,340-row payroll
+validation is not claimed.
 
 ### Independent batch validation
 
@@ -239,6 +242,32 @@ the rates as sample/training data. No approved independent input or approved
 statutory rates are currently supplied, so a run without those sources will
 produce no successful rows. This workflow does not claim complete validation
 of the 7,340 payroll reference rows.
+
+### Partial payroll component audit (not Check 2)
+
+The separate source-only component audit reconstructs fixed salary,
+attendance-derived LOP and capped overtime hours, overtime pay, and PF from
+the employee, salary, attendance, assignment, role, and statutory-rate CSVs.
+It writes a row-level `payroll_component_audit.csv` plus
+`payroll_component_audit_summary.json`:
+
+```powershell
+python -m scripts.payroll_component_audit `
+  --data-dir C:\GrowMar\03_Data\csv `
+  --output-dir C:\path\to\new-payroll-component-audit
+```
+
+The output directory must not already contain either output file. Every row
+and the summary are labeled **PARTIAL RECONCILIATION — NOT A COMPLETE CHECK 2
+PASS**. `payroll_items.csv` is loaded only for explicitly named comparison
+columns; its amounts never feed a calculation. The report marks the two
+HALF_UP versus reference one-paisa overtime differences, records the 44
+`esi_applicable=N` ESI rows as unresolved source-data conflicts without
+changing the existing flag rule, and marks EMP-0566 / PR-2026-01 attendance-
+dependent values unavailable. PF is compared using reconstructed earned Basic
+and the supplied sample rates; a match does not establish legal correctness.
+The report does not calculate variable pay, TDS, other deductions, complete
+gross pay, total deductions, or net pay, and is not an official Check 2 export.
 
 ## LF-08 Payslips
 
@@ -886,6 +915,15 @@ certify that policy.
   skipped all rows because the independent variable-pay, TDS, and
   other-deduction inputs are absent. Payroll totals were not independently
   certified; no reference-value export was substituted for a calculation.
+- The separate payroll component audit is labeled **PARTIAL RECONCILIATION —
+  NOT A COMPLETE CHECK 2 PASS**. It compares source-reconstructed salary,
+  attendance, overtime, and PF values against clearly labeled reference
+  columns; it does not calculate variable pay, TDS, other deductions, full
+  gross, or net pay. It flags two one-paisa overtime rounding differences,
+  44 unresolved ESI eligibility conflicts, and the missing attendance for
+  EMP-0566 / PR-2026-01. The report files are
+  `artifacts/phase3/payroll_component_audit.csv` and
+  `artifacts/phase3/payroll_component_audit_summary.json`.
 - The official Check 2 compared zero calculated rows against 7,340 expected
   rows and therefore did not pass. This does not invalidate the separate
   5/5 source-integrity checks or payroll-to-ledger monthly check.

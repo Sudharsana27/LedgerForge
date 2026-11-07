@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -13,6 +14,12 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+AUDIT_SUMMARY = (
+    Path(__file__).resolve().parents[1]
+    / "artifacts"
+    / "phase3"
+    / "payroll_component_audit_summary.json"
+)
 
 
 OUTPUT = (
@@ -24,6 +31,13 @@ OUTPUT = (
 
 
 def build_report() -> None:
+    with AUDIT_SUMMARY.open(encoding="utf-8") as source:
+        audit = json.load(source)
+    rounding_cases = ", ".join(
+        f"{row['employee_id']}/{row['run_id']} "
+        f"{row['calculated']} vs {row['reference']}"
+        for row in audit["overtime_rounding_difference_rows"]
+    )
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     styles = getSampleStyleSheet()
     styles.add(
@@ -124,6 +138,19 @@ def build_report() -> None:
                     paragraph("<b>Evidence / limitation</b>", "TableSmall"),
                 ],
                 [
+                    paragraph("Partial component audit", "TableSmall"),
+                    paragraph(
+                        f"{audit['fixed_component_reference_matches']}/"
+                        f"{audit['fixed_component_rows_calculated']} fixed "
+                        f"matches; {audit['overtime_pay_reference_matches']}/"
+                        f"{audit['overtime_pay_calculated_rows']} overtime "
+                        f"matches; {audit['unresolved_esi_conflict_rows']} "
+                        "ESI conflicts; one attendance row unavailable. "
+                        "Not a complete Check 2 pass.",
+                        "TableSmall",
+                    ),
+                ],
+                [
                     paragraph("11 - Expenses", "TableSmall"),
                     paragraph(
                         "Completed and independently verified",
@@ -143,7 +170,8 @@ def build_report() -> None:
                     ),
                     paragraph(
                         "Lifecycle, idempotency, posting and reversal tested; "
-                        "independent Check 2: 7,340 skipped.",
+                        "complete Check 2 remains blocked; separate partial "
+                        "component audit generated.",
                         "TableSmall",
                     ),
                 ],
@@ -257,9 +285,29 @@ def build_report() -> None:
             "processed 7,340 eligible employee/run rows and skipped all "
             "7,340 for the same reason: missing independent variable-pay, "
             "TDS, and other-deduction inputs. The official Check 2 found "
-            "0/7,340 result rows; no payroll match is claimed. Fixed pay, "
-            "LOP, and paid overtime hours were independently reconstructed "
-            "for all 7,340 rows in the Task 7 source investigation.",
+            "0/7,340 result rows; no payroll match is claimed. A separate "
+            "source-only partial audit reconstructs fixed components for "
+            f"{audit['fixed_component_rows_calculated']}/"
+            f"{audit['source_employee_run_rows']} employee/run rows and "
+            f"attendance-dependent values for "
+            f"{audit['lop_source_rows_calculated']} rows; "
+            f"{audit['attendance_unavailable_rows']} row is unavailable "
+            "because attendance is missing.",
+        ),
+        paragraph(
+            "<b>PARTIAL RECONCILIATION — NOT A COMPLETE CHECK 2 PASS.</b> "
+            f"Overtime pay matches {audit['overtime_pay_reference_matches']}/"
+            f"{audit['overtime_pay_calculated_rows']} calculable rows; the "
+            f"{len(audit['overtime_rounding_difference_rows'])} explicit "
+            f"HALF_UP/reference one-paisa differences are {rounding_cases}. "
+            f"PF employee/employer matches are "
+            f"{audit['pf_employee_reference_matches']}/"
+            f"{audit['pf_employee_calculated_rows']} and "
+            f"{audit['pf_employer_reference_matches']}/"
+            f"{audit['pf_employer_calculated_rows']}; these use sample rates. "
+            f"{audit['unresolved_esi_conflict_rows']} ESI rows remain "
+            "unresolved source-data conflicts. No variable pay, TDS, other "
+            "deductions, complete gross, or net pay is claimed.",
         ),
         paragraph(
             "Tax and statutory rate rows are explicitly marked sample or "
@@ -286,7 +334,7 @@ def build_report() -> None:
                 ],
                 [
                     paragraph("Pytest regression + Phase 3", "TableSmall"),
-                    paragraph("178 passed; 1 warning", "TableSmall"),
+                    paragraph("181 passed; 1 warning", "TableSmall"),
                 ],
                 [
                     paragraph("Independent payroll Check 2", "TableSmall"),
