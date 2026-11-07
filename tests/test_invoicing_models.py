@@ -706,4 +706,4 @@ def test_invoicing_migration_leaves_one_alembic_head():
     project_root = Path(__file__).resolve().parents[1]
     config = Config(str(project_root / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["a390f1b6d2e8"]
+    assert script.get_heads() == ["d1e4a6b8c0f2"]

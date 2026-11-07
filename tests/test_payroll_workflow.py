@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -20,6 +21,7 @@ from app.payroll_workflow_service import (
     PayrollRunItemInput,
     PayrollWorkflowError,
     create_payroll_run,
+    process_payroll_run,
 )
 from app.payroll_workflow_service import (
     approve_payroll_run,
@@ -159,7 +161,7 @@ def test_payroll_post_payment_and_reversal_are_atomic_and_idempotent(
                 total_net=Decimal("900.00"),
                 total_employer_contributions=Decimal("100.00"),
                 total_employer_cost=Decimal("1100.00"),
-                status="APPROVED",
+                status="PROCESSED",
                 run_by="U-1",
                 approved_by="U-2",
                 created_at=datetime(2025, 5, 1),
@@ -211,6 +213,7 @@ def test_payroll_post_payment_and_reversal_are_atomic_and_idempotent(
         )
         assert run.status == "APPROVED"
         assert posting.source_type == "PAYROLL_RUN"
+        assert run.journal_entry_id == posting.entry_id
         assert approve_payroll_run(
             db, "PR-2025-04", approved_by="U-2"
         )[1].entry_id == posting.entry_id
@@ -375,4 +378,16 @@ def test_create_payroll_run_saves_calculation_and_validates_idempotency(
             assert "Idempotency key conflicts" in str(exc)
         else:
             raise AssertionError("A changed request reused an idempotency key.")
+        run_id = run.run_id
+        db.rollback()
+        processed = process_payroll_run(
+            db,
+            run_id,
+            processed_by="U-1",
+            processed_at=datetime(2025, 5, 1),
+        )
+        assert processed.status == "PROCESSED"
+        assert processed.processed_by == "U-1"
+        with pytest.raises(PayrollWorkflowError, match="Only draft"):
+            process_payroll_run(db, run_id, processed_by="U-1")
     engine.dispose()

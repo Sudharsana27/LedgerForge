@@ -1,6 +1,6 @@
 from collections import defaultdict
-from datetime import date, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from uuid import uuid4
 
 from sqlalchemy import or_, select
@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 from .models import (
     PayrollItem,
     PayrollRun,
+    StatutoryRate,
+    StatutoryRateAudit,
     TaxParameter,
+    TaxParameterAudit,
     TaxSlab,
     TaxSlabAudit,
 )
@@ -31,6 +34,18 @@ class TaxConfigurationError(ValueError):
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def _valid_config_amount(value: Decimal, *, max_integer_digits: int) -> bool:
+    if not isinstance(value, Decimal) or not value.is_finite() or value < ZERO:
+        return False
+    try:
+        return (
+            value.quantize(Decimal("0.0001")) == value
+            and value < Decimal(10) ** max_integer_digits
+        )
+    except InvalidOperation:
+        return False
 
 
 def _effective_parameters(
@@ -205,7 +220,10 @@ def update_tax_slab(
         raise TaxConfigurationError(
             "Tax changes require a Session without an active transaction."
         )
-    if not rate_percent.is_finite() or rate_percent < ZERO or rate_percent > 100:
+    if (
+        not _valid_config_amount(rate_percent, max_integer_digits=3)
+        or rate_percent > 100
+    ):
         raise TaxConfigurationError(
             "Tax slab rate must be finite and between 0 and 100."
         )
@@ -259,6 +277,154 @@ def update_tax_slab(
     except IntegrityError as exc:
         raise TaxConfigurationError(
             "Tax slab version conflicts with an existing configuration."
+        ) from exc
+
+
+def update_tax_parameter(
+    db: Session,
+    *,
+    parameter: str,
+    value: Decimal,
+    effective_from: date,
+    changed_by: str,
+    changed_at: datetime | None = None,
+) -> TaxParameter:
+    if db.in_transaction():
+        raise TaxConfigurationError(
+            "Tax changes require a Session without an active transaction."
+        )
+    if not _valid_config_amount(value, max_integer_digits=14):
+        raise TaxConfigurationError(
+            "Tax parameter value must be finite, non-negative, and fit four decimal places."
+        )
+    if parameter == "health_education_cess_percent" and value > 100:
+        raise TaxConfigurationError(
+            "Tax cess percent must be between 0 and 100."
+        )
+    if effective_from <= date.today():
+        raise TaxConfigurationError(
+            "Tax changes must take effect on a future date."
+        )
+    try:
+        with db.begin():
+            versions = db.scalars(
+                select(TaxParameter).where(
+                    TaxParameter.parameter == parameter
+                )
+            ).all()
+            if not versions:
+                raise TaxConfigurationError(
+                    "Tax parameter does not exist."
+                )
+            latest = max(
+                versions,
+                key=lambda row: row.effective_from or date.min,
+            )
+            latest_date = latest.effective_from or date.min
+            if effective_from <= latest_date:
+                raise TaxConfigurationError(
+                    "A tax parameter version must take effect after its latest version."
+                )
+            updated = TaxParameter(
+                parameter=parameter,
+                effective_from=effective_from,
+                value=value,
+                note=latest.note,
+            )
+            db.add(updated)
+            db.add(
+                TaxParameterAudit(
+                    audit_id=uuid4().hex,
+                    parameter=parameter,
+                    previous_value=latest.value,
+                    new_value=value,
+                    effective_from=effective_from,
+                    changed_by=changed_by,
+                    changed_at=changed_at or datetime.now(),
+                )
+            )
+            db.flush()
+            return updated
+    except IntegrityError as exc:
+        raise TaxConfigurationError(
+            "Tax parameter version conflicts with an existing configuration."
+        ) from exc
+
+
+def update_statutory_rate(
+    db: Session,
+    *,
+    parameter: str,
+    value: Decimal,
+    effective_from: date,
+    source_note: str,
+    changed_by: str,
+    changed_at: datetime | None = None,
+) -> StatutoryRate:
+    if db.in_transaction():
+        raise TaxConfigurationError(
+            "Statutory rate changes require a Session without an active transaction."
+        )
+    if not _valid_config_amount(value, max_integer_digits=14):
+        raise TaxConfigurationError(
+            "Statutory rate must be finite, non-negative, and fit four decimal places."
+        )
+    if not source_note.strip():
+        raise TaxConfigurationError(
+            "A source note is required for statutory rate changes."
+        )
+    if effective_from <= date.today():
+        raise TaxConfigurationError(
+            "Statutory rate changes must take effect on a future date."
+        )
+    try:
+        with db.begin():
+            versions = db.scalars(
+                select(StatutoryRate)
+                .where(StatutoryRate.parameter == parameter)
+                .order_by(
+                    StatutoryRate.effective_from.desc(),
+                    StatutoryRate.id.desc(),
+                )
+            ).all()
+            if not versions:
+                raise TaxConfigurationError(
+                    "Statutory rate parameter does not exist."
+                )
+            latest = versions[0]
+            if "percent" in latest.unit.lower() and value > 100:
+                raise TaxConfigurationError(
+                    "A percentage statutory rate must be between 0 and 100."
+                )
+            if effective_from <= latest.effective_from:
+                raise TaxConfigurationError(
+                    "A statutory rate version must take effect after its latest version."
+                )
+            updated = StatutoryRate(
+                parameter=parameter,
+                value=value,
+                unit=latest.unit,
+                note=source_note.strip(),
+                effective_from=effective_from,
+            )
+            db.add(updated)
+            db.flush()
+            db.add(
+                StatutoryRateAudit(
+                    audit_id=uuid4().hex,
+                    parameter=parameter,
+                    previous_value=latest.value,
+                    new_value=value,
+                    effective_from=effective_from,
+                    changed_by=changed_by,
+                    changed_at=changed_at or datetime.now(),
+                )
+            )
+            db.flush()
+            return updated
+    except IntegrityError as exc:
+        raise TaxConfigurationError(
+            "Statutory rate version conflicts with an existing configuration."
         ) from exc
 
 

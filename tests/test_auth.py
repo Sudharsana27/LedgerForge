@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI
@@ -10,7 +11,14 @@ from sqlalchemy.orm import sessionmaker
 from app.auth import ALGORITHM
 from app.config import settings
 from app.database import Base, get_db
-from app.models import Department, Employee, Role, User
+from app.models import (
+    Department,
+    Employee,
+    Role,
+    StatutoryRate,
+    TaxParameter,
+    User,
+)
 from app.routers import auth, employees, expenses, payslips, reports, tax
 
 
@@ -106,6 +114,23 @@ def security_client(tmp_path, monkeypatch):
                     password_hash=hash_password("correct-horse-battery"),
                 )
             )
+        db.add(
+            TaxParameter(
+                parameter="health_education_cess_percent",
+                effective_from=None,
+                value=5,
+                note="Test setting",
+            )
+        )
+        db.add(
+            StatutoryRate(
+                parameter="PF_EMPLOYEE_RATE",
+                value=12,
+                unit="percent of basic",
+                note="Test setting",
+                effective_from=date(2025, 4, 1),
+            )
+        )
         db.commit()
 
     def override_db():
@@ -246,6 +271,26 @@ def test_bearer_validation_role_checks_and_employee_isolation(security_client):
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            "/tax/statutory-rates/PF_EMPLOYEE_RATE/versions",
+            headers=employee_headers,
+            json={
+                "value": "13",
+                "effective_from": "2027-01-01",
+                "source_note": "Test configuration only",
+            },
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/tax/parameters/health_education_cess_percent/versions",
+            headers=employee_headers,
+            json={"value": "4", "effective_from": "2027-01-01"},
+        ).status_code
+        == 403
+    )
     admin_token = _token(client, "admin@example.test")
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     authorized_but_missing = client.post(
@@ -254,6 +299,40 @@ def test_bearer_validation_role_checks_and_employee_isolation(security_client):
         json={"rate_percent": "11", "effective_from": "2027-01-01"},
     )
     assert authorized_but_missing.status_code == 404
+    rate_update = client.post(
+        "/tax/statutory-rates/PF_EMPLOYEE_RATE/versions",
+        headers=admin_headers,
+        json={
+            "value": "13",
+            "effective_from": "2027-01-01",
+            "source_note": "Test configuration only",
+        },
+    )
+    assert rate_update.status_code == 201
+    assert Decimal(rate_update.json()["value"]) == Decimal("13")
+    parameter_update = client.post(
+        "/tax/parameters/health_education_cess_percent/versions",
+        headers=admin_headers,
+        json={"value": "4", "effective_from": "2027-01-01"},
+    )
+    assert parameter_update.status_code == 201
+    assert Decimal(parameter_update.json()["value"]) == Decimal("4")
+    invalid_rate = client.post(
+        "/tax/statutory-rates/PF_EMPLOYEE_RATE/versions",
+        headers=admin_headers,
+        json={
+            "value": "101",
+            "effective_from": "2027-01-02",
+            "source_note": "Test invalid rate",
+        },
+    )
+    assert invalid_rate.status_code == 422
+    negative_parameter = client.post(
+        "/tax/parameters/health_education_cess_percent/versions",
+        headers=admin_headers,
+        json={"value": "-1", "effective_from": "2027-01-02"},
+    )
+    assert negative_parameter.status_code == 422
 
     hr_token = _token(client, "hr@example.test")
     hr_headers = {"Authorization": f"Bearer {hr_token}"}
@@ -267,6 +346,26 @@ def test_bearer_validation_role_checks_and_employee_isolation(security_client):
                 "rate_percent": "11",
                 "effective_from": "2027-01-01",
             },
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/tax/statutory-rates/PF_EMPLOYEE_RATE/versions",
+            headers=hr_headers,
+            json={
+                "value": "13",
+                "effective_from": "2027-01-01",
+                "source_note": "Test configuration only",
+            },
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/tax/parameters/health_education_cess_percent/versions",
+            headers=hr_headers,
+            json={"value": "4", "effective_from": "2027-01-01"},
         ).status_code
         == 403
     )

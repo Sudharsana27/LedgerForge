@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
@@ -12,16 +13,23 @@ from app.models import (
     PayrollItem,
     PayrollRun,
     Role,
+    StatutoryRate,
+    StatutoryRateAudit,
     TaxParameter,
+    TaxParameterAudit,
     TaxSlab,
     TaxSlabAudit,
     User,
 )
 from app.tax_service import (
+    TaxConfigurationError,
     build_statutory_report,
     calculate_annual_tds,
+    update_statutory_rate,
+    update_tax_parameter,
     update_tax_slab,
 )
+from app.payroll_service import _load_statutory_rates
 
 
 def test_tax_slab_versions_recalculate_without_changing_saved_payroll(
@@ -138,6 +146,15 @@ def test_tax_slab_versions_recalculate_without_changing_saved_payroll(
             ]
         )
         db.add(
+            StatutoryRate(
+                parameter="PF_EMPLOYEE_RATE",
+                value=Decimal("12"),
+                unit="percent of basic",
+                note="Test setting",
+                effective_from=date(2025, 4, 1),
+            )
+        )
+        db.add(
             PayrollRun(
                 run_id="PR-TAX",
                 period_start=date(2025, 4, 1),
@@ -208,6 +225,14 @@ def test_tax_slab_versions_recalculate_without_changing_saved_payroll(
         db.rollback()
 
         effective_change = date.today() + timedelta(days=2)
+        with pytest.raises(TaxConfigurationError, match="between 0 and 100"):
+            update_tax_slab(
+                db,
+                slab_id="TS-2",
+                rate_percent=Decimal("-1"),
+                effective_from=effective_change,
+                changed_by="U-ADMIN",
+            )
         changed = update_tax_slab(
             db,
             slab_id="TS-2",
@@ -227,11 +252,80 @@ def test_tax_slab_versions_recalculate_without_changing_saved_payroll(
         assert changed_result["annual_tax"] == Decimal("140400.00")
         db.rollback()
 
+        changed_cess = update_tax_parameter(
+            db,
+            parameter="health_education_cess_percent",
+            value=Decimal("5"),
+            effective_from=effective_change,
+            changed_by="U-ADMIN",
+        )
+        cess_restore_date = changed_cess.effective_from + timedelta(days=1)
+        db.rollback()
+        changed_cess_result = calculate_annual_tds(
+            db,
+            annual_gross_income=Decimal("1000000"),
+            financial_year="FY2025-26",
+            regime="NEW",
+            on_date=effective_change,
+        )
+        assert changed_cess_result["annual_tax"] > changed_result["annual_tax"]
+        db.rollback()
+        update_tax_parameter(
+            db,
+            parameter="health_education_cess_percent",
+            value=Decimal("4"),
+            effective_from=cess_restore_date,
+            changed_by="U-ADMIN",
+        )
+        db.rollback()
+        restored_cess_result = calculate_annual_tds(
+            db,
+            annual_gross_income=Decimal("1000000"),
+            financial_year="FY2025-26",
+            regime="NEW",
+            on_date=cess_restore_date,
+        )
+        assert restored_cess_result["annual_tax"] == changed_result["annual_tax"]
+        db.rollback()
+
+        rate_change_date = effective_change + timedelta(days=2)
+        changed_rate = update_statutory_rate(
+            db,
+            parameter="PF_EMPLOYEE_RATE",
+            value=Decimal("10"),
+            effective_from=rate_change_date,
+            source_note="Test rate change",
+            changed_by="U-ADMIN",
+        )
+        changed_rate_id = changed_rate.id
+        db.rollback()
+        assert _load_statutory_rates(
+            db,
+            rate_change_date,
+            {"PF_EMPLOYEE_RATE"},
+        ) == {"PF_EMPLOYEE_RATE": Decimal("10.0000")}
+        db.rollback()
+        restored_rate = update_statutory_rate(
+            db,
+            parameter="PF_EMPLOYEE_RATE",
+            value=Decimal("12"),
+            effective_from=rate_change_date + timedelta(days=1),
+            source_note="Test rate restoration",
+            changed_by="U-ADMIN",
+        )
+        db.rollback()
+        assert _load_statutory_rates(
+            db,
+            rate_change_date + timedelta(days=1),
+            {"PF_EMPLOYEE_RATE"},
+        ) == {"PF_EMPLOYEE_RATE": Decimal("12.0000")}
+        db.rollback()
+
         restored = update_tax_slab(
             db,
             slab_id=changed_slab_id,
             rate_percent=Decimal("10"),
-            effective_from=effective_change + timedelta(days=2),
+            effective_from=effective_change + timedelta(days=4),
             changed_by="U-ADMIN",
         )
         db.rollback()
@@ -244,7 +338,49 @@ def test_tax_slab_versions_recalculate_without_changing_saved_payroll(
         )
         assert restored_result["annual_tax"] == original["annual_tax"]
         assert db.scalar(select(TaxSlabAudit.audit_id)) is not None
+        assert len(db.scalars(select(TaxParameterAudit.audit_id)).all()) == 2
+        assert len(db.scalars(select(StatutoryRateAudit.audit_id)).all()) == 2
+        assert db.get(StatutoryRate, changed_rate_id).value == Decimal("10.0000")
+        assert restored_rate.value == Decimal("12.0000")
         assert db.get(PayrollItem, "PI-TAX").tds == saved_tds
+    engine.dispose()
+
+
+def test_tax_calculation_rejects_overlapping_slab_ranges(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'tax-overlap.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add_all(
+            [
+                TaxSlab(
+                    slab_id="TS-LOW",
+                    regime="NEW",
+                    financial_year="FY2025-26",
+                    income_from=Decimal("0"),
+                    income_to=Decimal("100000"),
+                    rate_percent=Decimal("0"),
+                    effective_from=date(2025, 4, 1),
+                ),
+                TaxSlab(
+                    slab_id="TS-HIGH",
+                    regime="NEW",
+                    financial_year="FY2025-26",
+                    income_from=Decimal("90000"),
+                    income_to=None,
+                    rate_percent=Decimal("10"),
+                    effective_from=date(2025, 4, 1),
+                ),
+            ]
+        )
+        db.commit()
+        with pytest.raises(TaxConfigurationError, match="gap or overlap"):
+            calculate_annual_tds(
+                db,
+                annual_gross_income=Decimal("1000000"),
+                financial_year="FY2025-26",
+                regime="NEW",
+                on_date=date(2025, 4, 1),
+            )
     engine.dispose()
 
 

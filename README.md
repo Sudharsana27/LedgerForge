@@ -17,7 +17,7 @@ The project focuses on REST API development, relational database modelling, data
 | Database | SQLite starter configuration |
 | Migrations | Alembic |
 | Testing | Pytest |
-| Repository | [05_Starter_Project](https://github.com/Sudharsana27/05_Starter_Project) |
+| Repository | [LedgerForge](https://github.com/Sudharsana27/LedgerForge) |
 | Phase tag | `phase-1` |
 | Current task branch | `lf-05-salary-structures` |
 
@@ -806,19 +806,15 @@ python -m scripts.set_user_password --username admin@example.test
 
 Use `--reset` only when intentionally replacing an existing password. The
 password is entered interactively and is never accepted as a command-line
-argument. Configure a unique secret of at least 32 bytes in the local `.env`
-file before starting the API:
-
-```powershell
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-Do not commit the generated secret. ADMIN and HR users can access finance,
+argument. Configure a unique random secret of at least 32 bytes in the ignored local
+`.env` file before starting the API. Do not echo it into a terminal log,
+report, or source file, and never commit `.env`. ADMIN and HR users can access finance,
 employee-management, payroll, expense, tax, and statutory-report routes.
-Only ADMIN can create a future tax-slab version. Employees can view their own
-employee, salary, attendance, leave, and payslip records; HR can view those
-records for the organization. ADMIN is not implicitly granted HR-only
-payslip access.
+Only ADMIN can create future tax-slab, tax-parameter, and statutory-rate
+versions. Each change is appended with an audit record. Employees can view
+their own employee, salary, attendance, leave, and payslip records; HR can
+view those records for the organization. ADMIN is not implicitly granted
+HR-only payslip access.
 
 | Route / operation | Admin | HR | Employee |
 |---|---|---|---|
@@ -831,7 +827,7 @@ payslip access.
 | Payslips | Own record only | Any employee | Own record only |
 | Clients, invoices, receivables, expenses, vendors | Allow | Allow | Deny |
 | Financial and statutory reports, tax calculation/slab listing | Allow | Allow | Deny |
-| Tax slab version changes | Allow | Deny | Deny |
+| Tax slab, tax parameter, and statutory-rate versions | Allow | Deny | Deny |
 
 ### Payroll lifecycle
 
@@ -865,11 +861,15 @@ entries: `GET /reports/trial-balance`, `/reports/profit-and-loss`, and
 `/reports/balance-sheet`. The trial-balance export can be generated with
 `python -m scripts.export_trial_balance --output-file <new-file.csv>`.
 
-Tax slabs are versioned using effective dates and each update is audited.
-Statutory reports sum saved payroll items. The supplied tax and statutory
-parameters are marked sample/training data; the calculation response exposes
-that condition, and these outputs must not be treated as approved tax advice
-or production compliance.
+Tax slabs, tax parameters, and statutory rates are versioned using future
+effective dates and audited. Admin-only endpoints create versions;
+`GET /tax/parameters` and `GET /tax/statutory-rates` list the effective-dated
+configuration history. Statutory reports sum saved payroll items. The
+supplied tax and statutory parameters are marked sample/training data; the
+calculation response exposes that condition, and these outputs must not be
+treated as approved tax advice or production compliance. A source note on a
+configured statutory rate records provenance but does not independently
+certify that policy.
 
 ### Phase 3 validation record
 
@@ -877,7 +877,8 @@ or production compliance.
   official account balances with no discrepancies.
 - The expense reconciliation compared 501 source bills over 18 months and
   found no monthly or vendor-month mismatches.
-- The complete regression and Phase 3 test suite passed 177 tests.
+- The complete regression and Phase 3 test suite passed 178 tests with one
+  upstream Starlette/httpx deprecation warning.
 - Official source summary: revenue 1,260,930,052.00; expenses
   1,036,246,464.42; profit 224,683,587.58; 18 payroll runs; employer cost
   861,586,392.42.
@@ -885,13 +886,25 @@ or production compliance.
   skipped all rows because the independent variable-pay, TDS, and
   other-deduction inputs are absent. Payroll totals were not independently
   certified; no reference-value export was substituted for a calculation.
+- The official Check 2 compared zero calculated rows against 7,340 expected
+  rows and therefore did not pass. This does not invalidate the separate
+  5/5 source-integrity checks or payroll-to-ledger monthly check.
+- The PF, ESI, and TDS report totals matched the supplied payroll-item
+  totals for all 54 month/type checks. This validates report summation, not
+  the sample rates' legal correctness.
+- A 64-byte random JWT secret is configured only in local `.env`; a
+  disposable login returned a 30-minute token and accessed a protected route.
+- The audit migration `d1e4a6b8c0f2` was applied after a local database
+  backup; source row counts and SQLite integrity were preserved.
 
-The additive migration is `a390f1b6d2e8`. Fresh databases can use
-`alembic upgrade head`. The supplied seeded SQLite database has a legacy
-revision marker despite containing later baseline tables; back it up and
-verify the schema before adopting it at `e7c2d10f4b39` and upgrading. This
-migration is intentionally non-reversible because it adds financial history
-and credentials.
+The Phase 3 workflow migration is `a390f1b6d2e8`; the subsequent
+tax-configuration audit migration is `d1e4a6b8c0f2`. Fresh databases can use
+`alembic upgrade head`. Before adoption, the supplied seeded SQLite database
+had a legacy revision marker despite containing later baseline tables; the
+local working copy was backed up, verified, and upgraded through the current
+head. Back up and verify any other copy before upgrading it. These migrations
+are intentionally non-reversible because they add financial history,
+credentials, and configuration audit records.
 
 ## Training Roadmap
 

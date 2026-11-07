@@ -1222,6 +1222,38 @@ class TaxSlabAudit(Base):
     changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class TaxParameterAudit(Base):
+    __tablename__ = "tax_parameter_audits"
+
+    audit_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    parameter: Mapped[str] = mapped_column(String(100), nullable=False)
+    previous_value: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False
+    )
+    new_value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    changed_by: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class StatutoryRateAudit(Base):
+    __tablename__ = "statutory_rate_audits"
+
+    audit_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    parameter: Mapped[str] = mapped_column(String(100), nullable=False)
+    previous_value: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False
+    )
+    new_value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    changed_by: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 @event.listens_for(Session, "before_flush")
 def _prevent_posted_journal_mutations(session, _flush_context, _instances):
     for instance in session.new:
