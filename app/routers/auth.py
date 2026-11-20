@@ -39,7 +39,9 @@ def login(payload: LoginInput, db: Session = Depends(get_db)) -> AccessTokenOut:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         token = create_access_token(user)
-        user.last_login_at = datetime.now(timezone.utc).isoformat()
+        user.last_login_at = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
         db.commit()
         return AccessTokenOut(
             access_token=token,

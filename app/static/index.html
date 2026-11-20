@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#153a35">
+  <title>LedgerForge Demo</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172b28; background: #f3f6f4; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { background: #153a35; color: white; padding: 1.2rem max(1rem, calc((100% - 960px) / 2)); }
+    header h1 { margin: 0; font-size: 1.35rem; }
+    header p { margin: .35rem 0 0; color: #d3e2dd; }
+    main { max-width: 960px; margin: 1.25rem auto; padding: 0 1rem 2rem; }
+    section { background: white; border: 1px solid #dce5e0; border-radius: .75rem; margin: 1rem 0; padding: 1rem; }
+    h2 { margin: 0 0 .6rem; font-size: 1.15rem; }
+    p { line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .75rem; }
+    label { display: grid; gap: .3rem; font-weight: 600; }
+    input, select, button { min-height: 44px; border: 1px solid #aebdb6; border-radius: .4rem; padding: .6rem; font: inherit; }
+    input:focus, select:focus, button:focus-visible { outline: 3px solid #82c7a6; outline-offset: 2px; }
+    button { background: #17684d; color: white; border: 0; font-weight: 700; cursor: pointer; margin-top: .8rem; }
+    button.secondary { background: #e8efeb; color: #153a35; border: 1px solid #b9c9c1; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .notice { min-height: 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .muted { color: #52635c; }
+    iframe { display: none; width: 100%; height: min(70vh, 760px); border: 1px solid #dce5e0; border-radius: .4rem; margin-top: .75rem; }
+    a { color: #145e48; }
+    [hidden] { display: none !important; }
+    @media (max-width: 480px) { main { margin-top: .5rem; padding-inline: .65rem; } section { padding: .8rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LedgerForge Demo</h1>
+    <p>Authenticated payroll tools. Payroll processing requires an available background worker.</p>
+  </header>
+  <main>
+    <section aria-labelledby="login-title">
+      <h2 id="login-title">Sign in</h2>
+      <form id="login-form">
+        <div class="grid">
+          <label>Username <input id="username" name="username" autocomplete="username" required maxlength="255"></label>
+          <label>Password <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="72"></label>
+        </div>
+        <button type="submit">Sign in</button>
+        <button id="logout" class="secondary" type="button" hidden>Sign out</button>
+      </form>
+      <p id="login-message" class="notice" role="status" aria-live="polite"></p>
+    </section>
+
+    <div id="protected-tools" hidden>
+      <section aria-labelledby="calculate-title">
+        <h2 id="calculate-title">Payroll calculation preview</h2>
+        <p class="muted">Uses the authenticated stateless calculation endpoint. Enter the source-supported inputs; this does not create, approve, or pay a payroll run.</p>
+        <form id="calculate-form">
+          <div class="grid">
+            <label>Employee ID <input name="employee_id" required maxlength="20"></label>
+            <label>Period start <input name="period_start" type="date" required></label>
+            <label>Period end <input name="period_end" type="date" required></label>
+            <label>Variable pay <input name="variable_pay" type="number" min="0" step="0.01" required></label>
+            <label>Variable-pay source category <input name="variable_pay_type" maxlength="100"></label>
+            <label>TDS input <input name="tds" type="number" min="0" step="0.01" required></label>
+            <label>Other deductions <input name="other_deductions" type="number" min="0" step="0.01" required></label>
+          </div>
+          <button type="submit">Calculate preview</button>
+        </form>
+        <pre id="calculation-result" class="notice" role="status" aria-live="polite"></pre>
+      </section>
+
+      <section aria-labelledby="job-title">
+        <h2 id="job-title">18-month background payroll</h2>
+        <p class="muted">This queues processing of eligible DRAFT payroll runs through Celery. It never falls back to synchronous execution. Do not start it unless you are authorized to process the database's draft runs.</p>
+        <button id="start-job" type="button">Queue 18-month payroll job</button>
+        <div class="grid">
+          <label>Job ID <input id="job-id" maxlength="36" placeholder="Returned after a job is queued"></label>
+        </div>
+        <button id="check-job" class="secondary" type="button">Check job status</button>
+        <p id="job-message" class="notice" role="status" aria-live="polite"></p>
+      </section>
+
+      <section aria-labelledby="payslip-title">
+        <h2 id="payslip-title">View or download a payslip</h2>
+        <form id="payslip-form">
+          <div class="grid">
+            <label>Employee ID <input name="employee_id" required maxlength="20"></label>
+            <label>Payroll run ID <input name="run_id" required maxlength="30"></label>
+          </div>
+          <button type="submit">Load payslip PDF</button>
+        </form>
+        <p id="payslip-message" class="notice" role="status" aria-live="polite"></p>
+        <a id="download-payslip" hidden>Download payslip PDF</a>
+        <iframe id="payslip-preview" title="Payslip PDF preview"></iframe>
+      </section>
+    </div>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+      const tokenKey = "ledgerforge_demo_access_token";
+      const token = () => sessionStorage.getItem(tokenKey);
+      const protectedTools = document.getElementById("protected-tools");
+      const loginMessage = document.getElementById("login-message");
+      let pdfUrl = null;
+      let pollTimer = null;
+
+      async function api(path, options = {}) {
+        const headers = new Headers(options.headers || {});
+        if (token()) headers.set("Authorization", `Bearer ${token()}`);
+        if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+        const response = await fetch(path, { ...options, headers });
+        if (response.status === 401 && token()) {
+          sessionStorage.removeItem(tokenKey);
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = null;
+          clearPrivateResults();
+          updateSession();
+        }
+        return response;
+      }
+
+      async function responseMessage(response) {
+        try {
+          const body = await response.json();
+          return body.detail || JSON.stringify(body);
+        } catch {
+          return `Request failed with HTTP ${response.status}.`;
+        }
+      }
+
+      function updateSession() {
+        const signedIn = Boolean(token());
+        protectedTools.hidden = !signedIn;
+        document.getElementById("logout").hidden = !signedIn;
+        loginMessage.textContent = signedIn ? "Signed in for this browser session." : "Sign in to use protected endpoints.";
+      }
+
+      function clearPrivateResults() {
+        document.getElementById("calculation-result").textContent = "";
+        document.getElementById("job-message").textContent = "";
+        document.getElementById("job-id").value = "";
+        document.getElementById("payslip-message").textContent = "";
+        if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+        pdfUrl = null;
+        const preview = document.getElementById("payslip-preview");
+        preview.removeAttribute("src");
+        preview.style.display = "none";
+        const download = document.getElementById("download-payslip");
+        download.removeAttribute("href");
+        download.hidden = true;
+      }
+
+      document.getElementById("login-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        loginMessage.textContent = "Signing in…";
+        const form = new FormData(event.currentTarget);
+        try {
+          const response = await fetch("/api/v1/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: form.get("username"), password: form.get("password") })
+          });
+          if (!response.ok) throw new Error(await responseMessage(response));
+          const result = await response.json();
+          sessionStorage.setItem(tokenKey, result.access_token);
+          event.currentTarget.reset();
+          updateSession();
+        } catch (error) {
+          loginMessage.textContent = error.message || "Sign-in failed.";
+        }
+      });
+
+      document.getElementById("logout").addEventListener("click", () => {
+        sessionStorage.removeItem(tokenKey);
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+        clearPrivateResults();
+        updateSession();
+      });
+
+      document.getElementById("calculate-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const output = document.getElementById("calculation-result");
+        output.textContent = "Calculating…";
+        const form = new FormData(event.currentTarget);
+        const variablePayType = String(form.get("variable_pay_type") || "").trim();
+        const payload = {
+          employee_id: form.get("employee_id"),
+          period_start: form.get("period_start"),
+          period_end: form.get("period_end"),
+          variable_pay: form.get("variable_pay"),
+          variable_pay_type: variablePayType || null,
+          tds: form.get("tds"),
+          other_deductions: form.get("other_deductions")
+        };
+        try {
+          const response = await api("/api/v1/payroll/calculate", { method: "POST", body: JSON.stringify(payload) });
+          if (!response.ok) throw new Error(await responseMessage(response));
+          output.textContent = JSON.stringify(await response.json(), null, 2);
+        } catch (error) {
+          output.textContent = error.message || "Calculation failed.";
+        }
+      });
+
+      async function checkJobStatus() {
+        const id = document.getElementById("job-id").value.trim();
+        const output = document.getElementById("job-message");
+        if (!id) { output.textContent = "Enter a job ID first."; return; }
+        try {
+          const response = await api(`/api/v1/jobs/${encodeURIComponent(id)}`);
+          if (!response.ok) throw new Error(await responseMessage(response));
+          const result = await response.json();
+          output.textContent = JSON.stringify(result, null, 2);
+          if (["COMPLETED", "FAILED"].includes(result.status) && pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+        } catch (error) {
+          output.textContent = error.message || "Job status is unavailable.";
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+      }
+
+      document.getElementById("start-job").addEventListener("click", async () => {
+        const output = document.getElementById("job-message");
+        if (!window.confirm("Queue processing of eligible DRAFT payroll runs across the latest 18 periods? This writes payroll records; it does not pay them.")) return;
+        output.textContent = "Checking background worker and queueing…";
+        try {
+          const response = await api("/api/v1/jobs/payroll/18-month", { method: "POST" });
+          if (!response.ok) throw new Error(await responseMessage(response));
+          const job = await response.json();
+          document.getElementById("job-id").value = job.job_id;
+          output.textContent = JSON.stringify(job, null, 2);
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(checkJobStatus, 5000);
+          checkJobStatus();
+        } catch (error) {
+          output.textContent = error.message || "Job submission failed.";
+        }
+      });
+
+      document.getElementById("check-job").addEventListener("click", checkJobStatus);
+
+      document.getElementById("payslip-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const message = document.getElementById("payslip-message");
+        message.textContent = "Loading payslip…";
+        const form = new FormData(event.currentTarget);
+        const employee = encodeURIComponent(String(form.get("employee_id")).trim());
+        const run = encodeURIComponent(String(form.get("run_id")).trim());
+        try {
+          const response = await api(`/api/v1/payslips/${employee}/${run}`);
+          if (!response.ok) throw new Error(await responseMessage(response));
+          const blob = await response.blob();
+          if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+          pdfUrl = URL.createObjectURL(blob);
+          const preview = document.getElementById("payslip-preview");
+          preview.src = pdfUrl;
+          preview.style.display = "block";
+          const download = document.getElementById("download-payslip");
+          download.href = pdfUrl;
+          download.download = `payslip-${decodeURIComponent(employee)}-${decodeURIComponent(run)}.pdf`;
+          download.hidden = false;
+          message.textContent = "Payslip loaded. Use the link to download the PDF.";
+        } catch (error) {
+          message.textContent = error.message || "Payslip could not be loaded.";
+        }
+      });
+
+      updateSession();
+    })();
+  </script>
+</body>
+</html>

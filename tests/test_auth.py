@@ -166,7 +166,7 @@ def _token(client, username):
 
 
 def test_login_issues_thirty_minute_token_without_exposing_hash(security_client):
-    client, _ = security_client
+    client, session_factory = security_client
     response = client.post(
         "/auth/login",
         json={
@@ -186,6 +186,11 @@ def test_login_issues_thirty_minute_token_without_exposing_hash(security_client)
     assert claims["exp"] - claims["iat"] == 1800
     assert "password_hash" not in result
     assert "correct-horse-battery" not in result.values()
+    with session_factory() as db:
+        stored_user = db.get(User, "U-ADMIN")
+        assert stored_user is not None
+        assert stored_user.last_login_at is not None
+        assert len(stored_user.last_login_at) <= 30
 
 
 def test_login_rejects_bad_password_and_missing_secret_safely(

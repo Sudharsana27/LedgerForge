@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -54,6 +57,11 @@ def health():
     }
 
 
+@app.get("/", include_in_schema=False)
+def demo_ui_redirect():
+    return RedirectResponse("/demo/")
+
+
 ROUTERS = (
     departments.router,
     auth.router,
@@ -78,3 +86,9 @@ ROUTERS = (
 for router in ROUTERS:
     app.include_router(router)
     app.include_router(router, prefix="/api/v1")
+
+app.mount(
+    "/demo",
+    StaticFiles(directory=Path(__file__).parent / "static", html=True),
+    name="demo-ui",
+)

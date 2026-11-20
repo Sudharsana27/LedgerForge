@@ -1032,9 +1032,11 @@ git diff --check
 
 The test suite uses labeled synthetic records for attendance aggregation and
 leave behavior, so CI does not require the external training CSV directory.
-The 10 payslip source-comparison cases skip when their untracked source files
-are absent; they are not official reconciliation results. The latest
-no-dataset run completed with 197 passed, 10 skipped, and 82% app coverage.
+The three payslip source-comparison cases require the external LF-08 source
+CSV files and skip when those files are absent; synthetic tests do not claim
+official reconciliation results. The latest full local run, with all 11
+required source files available, completed with 220 passed, 0 skipped, and
+84% app coverage.
 
 For hosted deployment, set `DATABASE_URL` and a strong `SECRET_KEY` in the
 hosting dashboard. `REDIS_URL` is optional: without Redis and a responding
@@ -1065,19 +1067,56 @@ python scripts/smoke_test.py `
   --other-deductions 0
 ```
 
-Use an authorized test account and a supported calculation period; do not
-claim official payroll validation from this smoke test.
+This checks health, docs, `/demo/`, login, and stateless payroll calculation.
+Use an authorized account and a supported period with actual required payroll
+inputs. It reports pass/fail, not payroll amounts. To also verify an existing
+run whose payslip the account is authorized to access, run:
+
+```powershell
+python scripts/smoke_test.py `
+  --base-url https://YOUR-HOSTNAME `
+  --username YOUR-TEST-USERNAME `
+  --employee-id EMPLOYEE-ID `
+  --period-start YYYY-MM-DD `
+  --period-end YYYY-MM-DD `
+  --variable-pay 0 `
+  --tds 0 `
+  --other-deductions 0 `
+  --run-id EXISTING-RUN-ID `
+  --payslip-output "$env:TEMP\ledgerforge-demo-payslip.pdf"
+```
+
+The four-record demo account alone has no salary, attendance, payroll-run, or
+payslip records, so these checks require separately authorized synthetic
+calculation/payroll data. This smoke test does not fabricate inputs or claim
+official payroll reconciliation.
 
 #### Task 17 hosting recommendation and limits
 
-For a no-cost demonstration, the simplest compatible deployment is one
-Docker web service on Render connected to the already-created PostgreSQL
-service, provided the database plan is confirmed to be free and appropriate
-for a temporary demo. Do not create a Redis service or background worker for
-this configuration. The API can start without Redis; background payroll
-endpoints will explicitly return HTTP 503 until Redis and a Celery worker are
-configured. Do not use free or ephemeral services for real payroll or
-employee records.
+The Render Docker web service is reported live at
+[`https://ledgerforge-bzmo.onrender.com`](https://ledgerforge-bzmo.onrender.com);
+the API health and Swagger endpoints were verified in the prior deployment
+step. The responsive same-origin interface is served at `/demo/` by the
+application image and will require an approved deployment of the current
+worktree before that public URL serves it. The site root redirects to `/demo/`.
+
+The interface offers bearer-token login, an explicit-input stateless payroll
+calculation preview, 18-month Celery job submission/status, and authorized
+payslip PDF viewing/download. The demo provisioning script creates only a
+department, role, employee, and user; it does not fabricate salary,
+attendance, payroll-run, or payslip records. Consequently calculation and
+payslip requests need genuine supported records in the database, and a
+newly provisioned four-record-only demo database cannot produce them.
+
+For a no-cost demonstration, use one Docker web service connected to a
+confirmed free, temporary PostgreSQL database. Do not create a Redis service
+or worker unless a no-cost option is verified and approved. Without a
+responding Celery worker, background payroll endpoints return HTTP 503; they
+never run synchronously. As of the current Render free-service offering,
+free web services are not a free background-worker solution. A free web
+service sleeping does not provide a reliable worker. Do not claim or enable
+the 18-month job in the free-only configuration. Do not use free or
+ephemeral services for real payroll or employee records.
 Render's [free web service](https://render.com/docs/free) sleeps after 15
 minutes without traffic and can take about a minute to wake; its filesystem
 is ephemeral. Free PostgreSQL is limited to 1 GB, expires after 30 days, and
@@ -1100,45 +1139,85 @@ not a free all-in-one deployment. Prices and terms were checked against
 provider documentation on 2026-11-20; recheck before choosing or paying.
 
 The Render PostgreSQL resource is reported as created, but its plan, expiry,
-region, and data limits have not been independently verified here. No web
-service has been deployed and no public URL or live deployment has been
-verified.
+region, and data limits have not been independently verified here. The
+reported public API does not mean the current UI worktree is deployed. No
+hosted demo account has been provisioned from this workstation.
 
 ##### Manual Render deployment checklist (not yet executed)
 
-1. Sign in to Render and connect the authorized LedgerForge GitHub repository.
-   Select `lf-05-salary-structures` after its verified commit is pushed.
-2. In the Render dashboard, verify the existing PostgreSQL plan, region,
-   expiry, storage, and whether it incurs a charge. Do not create or upgrade
-   any paid resource. If the existing database is not free, stop until a
-   no-cost database is available. Use its internal connection URL.
-3. Create a Docker **Web Service** from the repository root and use the
-   repository `Dockerfile` and default command. Set the health-check path to
-   `/api/v1/health`. The default command validates the environment, applies
-   Alembic migrations, then launches Uvicorn on the provider-supplied `PORT`.
-4. Add the PostgreSQL internal URL as `DATABASE_URL` and generate a
-   `SECRET_KEY` of at least 32 bytes in the Web Service's secret environment
-   settings. Leave `REDIS_URL` unset and do not create a worker for the free
-   demonstration. Do not copy credentials into Git, logs, or this chat.
-5. Do not seed or refresh the hosted database unless the approved official
-   CSV source and an explicit authorization to load it are available. If
-   seeding is approved, use a trusted operator machine and an empty target
-   database; do not run `--confirm-refresh` against an existing database.
-6. Configure an authorized existing user and password securely before
-   attempting login. Verify the automatically assigned HTTPS hostname, then
-   check `/api/v1/health` and `/docs`. The read-only smoke test also requires
-   an authorized account and supported calculation inputs; it does not prove
-   official payroll reconciliation.
-7. Leave background payroll unconfigured for this free setup. If enabling it
-   later, first approve the cost and persistence limits for Redis and a worker,
-   then set `REDIS_URL` and configure a Celery worker.
-8. Review database retention and backup/restore limitations in the dashboard.
-   Do not load real payroll or employee data into free or ephemeral services.
+##### Guarded synthetic demo account provisioning
 
-Manual deployment blockers are Render/GitHub authorization, confirmation
-that the existing PostgreSQL service is no-cost and suitable for a demo,
-and availability of an authorized user account. Do not deploy payroll or employee
-information on the described free-tier combinations.
+The separate `scripts/provision_hosted_demo.py` command is restricted to a
+PostgreSQL database named `ledgerforge_demo`, requires the expected hostname
+as an argument and an exact typed confirmation, and checks every application
+table is empty before inserting anything (the Alembic version table may
+contain migration metadata). It creates only the same clearly labeled
+synthetic demo department, role, employee, and user; it never loads CSV data.
+It refuses all existing business records, including payroll history. Run it
+only against a newly created, empty demo database, never the existing
+LedgerForge or production database.
+
+After an authorized deployment of the current code, the operator should:
+
+1. Verify the Render database is free, temporary, newly created, and intended
+   solely for synthetic demo records. Confirm its database name is exactly
+   `ledgerforge_demo`. If not, stop.
+2. In a private local checkout, create the ignored `.env` from `.env.example`
+   only if it does not already exist. Set `DATABASE_URL` to that new
+   database's internal URL and set a strong `SECRET_KEY`. Do not overwrite
+   any existing `.env`; do not paste either value into a command, commit, log,
+   or chat. PowerShell:
+
+   ```powershell
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+   notepad .env
+   ```
+3. Confirm the URL hostname and database name in the local secret
+   manager/editor, then run:
+
+   ```powershell
+   python -m scripts.provision_hosted_demo `
+     --expected-host YOUR-EXACT-POSTGRES-HOST `
+     --confirm-demo
+   ```
+
+   The provisioning command prompts for a typed
+   `CREATE-SYNTHETIC-DEMO ledgerforge_demo@YOUR-EXACT-POSTGRES-HOST`
+   confirmation and prompts twice for the password without echoing it. It
+   then applies Alembic migrations and creates the synthetic rows. It prints
+   only success and the synthetic username. If any business table is
+   populated, it refuses to proceed. It takes PostgreSQL table write locks
+   during the final empty-database check and insert to avoid races with
+   concurrent writers. If migration or record creation fails, record changes
+   are rolled back; migrations may already have completed on that still-empty
+   target.
+4. Verify the UI at `https://YOUR-RENDER-HOST/demo/`, sign in as
+   `demo_admin`, and test the read-only, stateless payroll calculation only
+   with actual authorized synthetic payroll inputs already present.
+5. Test a payslip with an existing valid employee/run pair for which that
+   principal is authorized. The four-record provisioning itself creates no
+   payslip.
+6. Treat the 18-month background job as unavailable unless Redis and a
+   responding Celery worker are separately configured and verified. Current
+   free-only service configuration has no background worker; the UI/API
+   should report HTTP 503 and must not run payroll inline.
+
+The same-origin UI and scripts are not live until an approved code deployment.
+Manual blockers are deployment approval, confirmation of the new database's
+free plan and hostname, authorization to provision synthetic data, and an
+authorized password. The free setup cannot perform the required 18-month
+Celery payroll job. Do not load real payroll or employee information into
+free or ephemeral services.
+
+Render's [free service types and limitations](https://render.com/docs/free)
+list free web services, PostgreSQL, and Key Value, but not background workers.
+Its [background worker documentation](https://render.com/docs/background-workers)
+describes workers as continuously running services. Therefore this app's
+18-month Celery operation requires a separately available worker and Redis;
+the listed Render free-only services do not provide that worker. Do not
+replace it with an HTTP request that runs payroll synchronously. Render
+Workflows are a separately billed compute service ([billing details](https://render.com/docs/workflows#how-are-workflows-billed)),
+not a no-payment substitute.
 
 ## Learning Outcomes
 
