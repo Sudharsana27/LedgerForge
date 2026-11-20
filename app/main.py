@@ -1,4 +1,8 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
 from .database import Base, engine
 from .routers import (
     attendance,
@@ -16,31 +20,61 @@ from .routers import (
     salary,
     tax,
 )
+from .routers import exports as exports_router
+from .routers import jobs as jobs_router
 
 Base.metadata.create_all(engine)
 
 app = FastAPI(
     title="LedgerForge API",
-    version="0.1.0",
+    version="1.0.0",
     description="Payroll, accounting and employee data engine for Zenith Nova Technologies",
 )
 
 @app.get("/health", tags=["system"])
+@app.get("/api/v1/health", tags=["system"])
 def health():
-    return {"status": "ok", "service": "ledgerforge"}
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "ledgerforge",
+                "database": "unavailable",
+            },
+        )
+    return {
+        "status": "ok",
+        "service": "ledgerforge",
+        "database": "ok",
+        "api_version": "v1",
+    }
 
-app.include_router(departments.router)
-app.include_router(auth.router)
-app.include_router(employees.router)
-app.include_router(salary.router)
-app.include_router(attendance.router)
-app.include_router(leave.router)
-app.include_router(payroll.router)
-app.include_router(payslips.router)
-app.include_router(clients.router)
-app.include_router(invoices.router)
-app.include_router(receivables.router)
-app.include_router(reports.router)
-app.include_router(expenses.vendors_router)
-app.include_router(expenses.router)
-app.include_router(tax.router)
+
+ROUTERS = (
+    departments.router,
+    auth.router,
+    employees.router,
+    salary.router,
+    attendance.router,
+    leave.router,
+    payroll.router,
+    payslips.router,
+    clients.router,
+    invoices.router,
+    receivables.router,
+    reports.router,
+    expenses.vendors_router,
+    expenses.router,
+    tax.router,
+    exports_router.router,
+    jobs_router.router,
+)
+
+# Existing integrations remain compatible while all canonical routes live under /api/v1.
+for router in ROUTERS:
+    app.include_router(router)
+    app.include_router(router, prefix="/api/v1")

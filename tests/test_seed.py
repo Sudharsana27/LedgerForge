@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pandas as pd
+import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
@@ -327,7 +328,17 @@ def test_seed_orders_salary_revisions_before_structures_on_orm_schema(
                 )
             )
 
-        seed.main()
+        with pytest.raises(RuntimeError, match="Use --confirm-refresh"):
+            seed.main()
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT department_name FROM departments "
+                    "WHERE department_id = 'D-LOCAL'"
+                )
+            ).scalar_one() == "Local"
+
+        seed.main(confirm_refresh=True)
         with engine.connect() as connection:
             assert connection.exec_driver_sql(
                 "PRAGMA foreign_keys"

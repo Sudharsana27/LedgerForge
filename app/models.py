@@ -1,6 +1,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
@@ -965,7 +966,7 @@ class PayrollRun(Base):
     run_id: Mapped[str] = mapped_column(String(30), primary_key=True)
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
-    pay_date: Mapped[date] = mapped_column(Date, nullable=False)
+    pay_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     employees_paid: Mapped[int] = mapped_column(Integer, nullable=False)
     total_gross: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     total_deductions: Mapped[Decimal] = mapped_column(
@@ -1185,12 +1186,25 @@ class TaxSlab(Base):
 class TaxParameter(Base):
     __tablename__ = "tax_parameters"
 
-    parameter: Mapped[str] = mapped_column(String(100), primary_key=True)
+    tax_parameter_id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    parameter: Mapped[str] = mapped_column(String(100), nullable=False)
     effective_from: Mapped[date | None] = mapped_column(
-        Date, primary_key=True, nullable=True
+        Date, nullable=True
     )
     value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "parameter",
+            "effective_from",
+            name="uq_tax_parameters_effective",
+        ),
+    )
 
 
 class StatutoryRate(Base):

@@ -112,7 +112,7 @@ def create_payroll_run(
         raise PayrollWorkflowError(
             "Payroll runs must cover one full calendar month."
         )
-    if pay_date < period_end:
+    if pay_date is None or pay_date < period_end:
         raise PayrollWorkflowError(
             "pay_date must be on or after the payroll period end."
         )
@@ -311,7 +311,7 @@ def process_payroll_run(
                 raise PayrollWorkflowError(
                     "Payroll runs must cover one full calendar month."
                 )
-            if run.pay_date < run.period_end:
+            if run.pay_date is None or run.pay_date < run.period_end:
                 raise PayrollWorkflowError(
                     "Payroll pay date must be on or after the period end."
                 )

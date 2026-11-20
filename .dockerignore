@@ -1,0 +1,16 @@
+.env*
+.venv
+.git
+.pytest_cache
+__pycache__
+*.py[cod]
+*.db
+*.csv
+**/*.csv
+artifacts
+secrets
+*.pem
+*.key
+check_migration.py
+check_salary_schema.py
+scripts/seed_lf02_backup.py

@@ -306,15 +306,15 @@ calculation, and sample statutory rates. Official reconciliation remains
 blocked because the verifier and complete payroll calculation inputs are
 unavailable.
 
-Payslip access fails closed. The route requires an
-`AuthenticatedPrincipal` from `get_authenticated_principal`; that dependency
-currently returns `401` because the project has no implemented authentication
-provider or trusted principal source. When an authentication provider is
-integrated, authorization permits the employee whose ID owns the payslip or a
-principal whose verified role is exactly `HR`. `ADMIN` is not treated as HR.
-Tests inject trusted principals only to exercise the policy; this is not a
-production login mechanism. Consequently, no user can fetch a payslip through
-the current production configuration until authentication is integrated.
+Authentication uses `POST /api/v1/auth/login` to issue a short-lived bearer
+token for an active user with a valid password hash. Accounts must already
+exist in the `users` table; the application does not create a default account
+or provide public signup. Set a password for an authorized existing user with
+`python -m scripts.set_user_password --username USERNAME` (the password is
+prompted securely). Payslip access requires a bearer token and permits the
+employee who owns the payslip or a principal whose verified role is exactly
+`HR`; `ADMIN` is not treated as HR. Tests inject trusted principals only to
+exercise authorization policy and are not an alternate production login.
 
 PDF generation and parsing are tested with ReportLab and pypdf. Install the
 declared dependencies from `requirements.txt`; run the focused payslip tests
@@ -358,8 +358,8 @@ Docker Desktop is required only for workflows that use the project's Docker conf
 ### 1. Clone the repository
 
 ```powershell
-git clone https://github.com/Sudharsana27/05_Starter_Project.git
-cd 05_Starter_Project
+git clone https://github.com/Sudharsana27/LedgerForge.git
+cd LedgerForge
 ```
 
 ### 2. Create a virtual environment
@@ -391,23 +391,33 @@ python -m pip install -r requirements.txt
 
 ### 5. Configure environment variables
 
-Create a local `.env` file using the example configuration provided in the repository.
+Create a local `.env` file using the example configuration provided in the
+repository, then set `SECRET_KEY` to a randomly generated value of at least
+32 UTF-8 bytes. Do not commit `.env` or paste secret values into issue
+trackers or chat.
 
 ```powershell
 Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Review the database URL and other settings in `.env`. Keep secrets and environment-specific values out of Git.
+Copy the generated value directly into `.env`; do not store it in source
+control. For local API authentication, configure this value even when using
+SQLite.
 
 ### 6. Prepare the database
 
-Use the project's Alembic migration workflow when setting up a fresh database:
+Apply the project migrations to the configured database:
 
 ```powershell
 python -m alembic upgrade head
 ```
 
-Follow the project's seeding instructions for the relevant dataset. The example seeder and the full CSV data seeder serve different purposes.
+The full training-data seeder expects the separate `03_Data\csv` directory,
+which is not included in this repository. It validates all input files before
+loading. It refuses to refresh any populated CSV-managed tables unless
+`--confirm-refresh` is explicitly supplied. Use that option only when an
+intentional complete data replacement is approved.
 
 ### 7. Start the API
 
@@ -960,6 +970,175 @@ The project has progressed through Phase 3 on branch
 leave, payroll-calculation, payslip, accounting-ledger, and receivables
 functionality. Phase 3 adds authentication and role checks, payroll lifecycle
 operations, expense workflows, tax/statutory reporting, and financial reports.
+
+### Release-candidate infrastructure
+
+The versioned API is under `/api/v1`; legacy unversioned routes remain
+available. The Celery payroll job calls the existing workflow for the 18
+newest periods and processes eligible `DRAFT` runs only. Paid, pending, and
+other non-draft runs are skipped. The supplied training snapshot contains 17
+`PAID` runs and one `POSTED - PAYMENT PENDING` run; the job must not be used to
+rewrite those historical records.
+
+The Docker image runs as a non-root user, includes the PDF font needed for
+payslips, and excludes `.env` files and secrets from its build context. Its
+default startup validates required deployment variables and applies Alembic
+migrations before starting Uvicorn. Production CSV seeding is deliberately
+not part of API startup.
+
+#### Docker Compose (Windows PowerShell)
+
+From the repository root, copy the template and set a random `SECRET_KEY`
+with at least 32 UTF-8 bytes in `.env`:
+
+```powershell
+Copy-Item .env.example .env
+docker compose -f docker-compose.dev.yml config --quiet
+docker compose -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.dev.yml ps
+curl.exe http://localhost:8000/api/v1/health
+```
+
+Compose starts PostgreSQL, Redis, the migration service, API, and worker. The
+worker health check verifies a Celery ping. OpenAPI is available at
+`http://localhost:8000/openapi.json` and Swagger UI at `http://localhost:8000/docs`.
+The PostgreSQL data is kept in the named `ledger_pg` volume. Use
+`docker compose -f docker-compose.dev.yml down` to stop/remove containers
+without deleting the database volume. Do not use `down -v` when preserving data.
+
+The external training data directory `..\03_Data\csv` is required only for
+seeding. The data is not stored in this repository. To load it into a fresh
+local database after the stack is up:
+
+```powershell
+docker compose -f docker-compose.dev.yml --profile seed run --rm seed
+```
+
+The seed command checks that CSV-managed tables are empty before inserting.
+It refuses to replace existing rows by default. `--confirm-refresh` is an
+explicit destructive opt-in for a complete CSV refresh; do not use it against
+a database containing live or user-generated data. API startup and every
+normal Compose restart run migrations only, never the seed.
+
+#### Test, migration, and smoke-test commands
+
+```powershell
+python -m pip install -r requirements.txt
+python -m alembic upgrade head
+python -m compileall -q app scripts alembic
+python -m pytest --cov=app --cov-report=term-missing -q
+git diff --check
+```
+
+The test suite uses labeled synthetic records for attendance aggregation and
+leave behavior, so CI does not require the external training CSV directory.
+The 10 payslip source-comparison cases skip when their untracked source files
+are absent; they are not official reconciliation results. The latest
+no-dataset run completed with 197 passed, 10 skipped, and 82% app coverage.
+
+For hosted deployment, set `DATABASE_URL` and a strong `SECRET_KEY` in the
+hosting dashboard. `REDIS_URL` is optional: without Redis and a responding
+Celery worker, background payroll job submission and status endpoints return
+HTTP 503 and do not run jobs synchronously. The application accepts
+`postgres://` and `postgresql://` provider URLs and normalizes them to the
+installed psycopg2 driver. The Docker startup command validates the required
+settings, applies Alembic migrations, then starts Uvicorn using the provider's
+`PORT`. Seed a new, empty hosted database only from an operator machine with
+the approved CSV directory mounted/readable and `DATABASE_URL` set to the
+hosted database.
+Do not include CSV files or production credentials in Git or the Docker image.
+
+The live smoke test performs read-only health/docs checks, authentication,
+and a stateless payroll calculation; it does not create, approve, or pay a
+payroll run. The password is prompted securely unless supplied through the
+`LEDGERFORGE_SMOKE_PASSWORD` environment variable:
+
+```powershell
+python scripts/smoke_test.py `
+  --base-url https://YOUR-HOSTNAME `
+  --username YOUR-TEST-USERNAME `
+  --employee-id EMP-0002 `
+  --period-start 2025-04-01 `
+  --period-end 2025-04-30 `
+  --variable-pay 0 `
+  --tds 0 `
+  --other-deductions 0
+```
+
+Use an authorized test account and a supported calculation period; do not
+claim official payroll validation from this smoke test.
+
+#### Task 17 hosting recommendation and limits
+
+For a no-cost demonstration, the simplest compatible deployment is one
+Docker web service on Render connected to the already-created PostgreSQL
+service, provided the database plan is confirmed to be free and appropriate
+for a temporary demo. Do not create a Redis service or background worker for
+this configuration. The API can start without Redis; background payroll
+endpoints will explicitly return HTTP 503 until Redis and a Celery worker are
+configured. Do not use free or ephemeral services for real payroll or
+employee records.
+Render's [free web service](https://render.com/docs/free) sleeps after 15
+minutes without traffic and can take about a minute to wake; its filesystem
+is ephemeral. Free PostgreSQL is limited to 1 GB, expires after 30 days, and
+has no backups. Free Key Value is in-memory and loses data on restart. Render
+explicitly says free instances are not for production. Paid background
+workers and persistent data services are required for an always-on setup;
+exact paid totals depend on service plans, region, storage, and the dashboard
+quote, so they are intentionally not estimated here.
+
+Other low-cost component combinations are possible but less simple to operate
+as one stack. [Neon Free](https://neon.com/pricing) PostgreSQL is $0 with
+1 GB per project and scales to zero after five minutes. [Upstash Redis
+Free](https://upstash.com/pricing/redis) is $0 with 250 MB, 10 GB monthly
+bandwidth, and 500,000 commands. These are prototype quotas, not availability
+guarantees or payroll-grade backups/uptime, and a separate always-on Celery
+worker still needs hosting. [Fly.io's current pricing](https://docs.fly.io/about/pricing/)
+lists compute from $2.19/month for a continuously running 256 MB shared CPU
+machine and Managed Postgres from $38/month, before storage and egress; it is
+not a free all-in-one deployment. Prices and terms were checked against
+provider documentation on 2026-11-20; recheck before choosing or paying.
+
+The Render PostgreSQL resource is reported as created, but its plan, expiry,
+region, and data limits have not been independently verified here. No web
+service has been deployed and no public URL or live deployment has been
+verified.
+
+##### Manual Render deployment checklist (not yet executed)
+
+1. Sign in to Render and connect the authorized LedgerForge GitHub repository.
+   Select `lf-05-salary-structures` after its verified commit is pushed.
+2. In the Render dashboard, verify the existing PostgreSQL plan, region,
+   expiry, storage, and whether it incurs a charge. Do not create or upgrade
+   any paid resource. If the existing database is not free, stop until a
+   no-cost database is available. Use its internal connection URL.
+3. Create a Docker **Web Service** from the repository root and use the
+   repository `Dockerfile` and default command. Set the health-check path to
+   `/api/v1/health`. The default command validates the environment, applies
+   Alembic migrations, then launches Uvicorn on the provider-supplied `PORT`.
+4. Add the PostgreSQL internal URL as `DATABASE_URL` and generate a
+   `SECRET_KEY` of at least 32 bytes in the Web Service's secret environment
+   settings. Leave `REDIS_URL` unset and do not create a worker for the free
+   demonstration. Do not copy credentials into Git, logs, or this chat.
+5. Do not seed or refresh the hosted database unless the approved official
+   CSV source and an explicit authorization to load it are available. If
+   seeding is approved, use a trusted operator machine and an empty target
+   database; do not run `--confirm-refresh` against an existing database.
+6. Configure an authorized existing user and password securely before
+   attempting login. Verify the automatically assigned HTTPS hostname, then
+   check `/api/v1/health` and `/docs`. The read-only smoke test also requires
+   an authorized account and supported calculation inputs; it does not prove
+   official payroll reconciliation.
+7. Leave background payroll unconfigured for this free setup. If enabling it
+   later, first approve the cost and persistence limits for Redis and a worker,
+   then set `REDIS_URL` and configure a Celery worker.
+8. Review database retention and backup/restore limitations in the dashboard.
+   Do not load real payroll or employee data into free or ephemeral services.
+
+Manual deployment blockers are Render/GitHub authorization, confirmation
+that the existing PostgreSQL service is no-cost and suitable for a demo,
+and availability of an authorized user account. Do not deploy payroll or employee
+information on the described free-tier combinations.
 
 ## Learning Outcomes
 

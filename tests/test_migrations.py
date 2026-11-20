@@ -30,6 +30,18 @@ SALARY_CONSTRAINT_REVISION_PATH = (
     / "versions"
     / "c3f4a8d1027b_allow_legacy_salary_ranges.py"
 )
+TAX_PARAMETER_REVISION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "alembic"
+    / "versions"
+    / "f3a7c91d2e64_allow_undated_tax_parameters.py"
+)
+HISTORICAL_PAY_DATE_REVISION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "alembic"
+    / "versions"
+    / "a82d6401f5c3_allow_missing_historical_pay_dates.py"
+)
 
 
 def _load_revision():
@@ -56,6 +68,26 @@ def _load_salary_constraint_revision():
     spec = importlib.util.spec_from_file_location(
         "salary_constraint_revision",
         SALARY_CONSTRAINT_REVISION_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_tax_parameter_revision():
+    spec = importlib.util.spec_from_file_location(
+        "undated_tax_parameter_revision",
+        TAX_PARAMETER_REVISION_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_historical_pay_date_revision():
+    spec = importlib.util.spec_from_file_location(
+        "historical_pay_date_revision",
+        HISTORICAL_PAY_DATE_REVISION_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -296,4 +328,104 @@ def test_salary_migration_removes_legacy_range_check_without_losing_rows(
                 "salary_structures"
             )
         }
+    engine.dispose()
+
+
+def test_tax_parameter_migration_preserves_undated_source_values(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'tax-parameters.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE tax_parameters ("
+                "parameter TEXT NOT NULL, "
+                "effective_from DATE NULL, "
+                "value NUMERIC NOT NULL, "
+                "note TEXT NULL, "
+                "PRIMARY KEY (parameter, effective_from))"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tax_parameters "
+                "(parameter, effective_from, value, note) "
+                "VALUES ('standard_deduction', NULL, 75000, 'source row')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tax_parameters "
+                "(parameter, effective_from, value, note) "
+                "VALUES ('standard_deduction', NULL, 80000, "
+                "'second legacy source row')"
+            )
+        )
+        _run_revision(
+            connection,
+            _load_tax_parameter_revision(),
+            "upgrade",
+        )
+        columns = {
+            column["name"]: column
+            for column in inspect(connection).get_columns("tax_parameters")
+        }
+        primary_key = inspect(connection).get_pk_constraint(
+            "tax_parameters"
+        )
+        assert columns["effective_from"]["nullable"] is True
+        assert columns["tax_parameter_id"]["nullable"] is False
+        assert primary_key["constrained_columns"] == ["tax_parameter_id"]
+        rows = connection.execute(
+            text(
+                "SELECT tax_parameter_id, parameter, effective_from, value "
+                "FROM tax_parameters ORDER BY value"
+            )
+        ).all()
+        assert len(rows) == 2
+        assert {row.parameter for row in rows} == {"standard_deduction"}
+        assert {row.effective_from for row in rows} == {None}
+        assert {row.value for row in rows} == {75000, 80000}
+        assert len({row.tax_parameter_id for row in rows}) == 2
+    engine.dispose()
+
+
+def test_historical_pay_date_migration_allows_missing_source_values(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'historical-pay-dates.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE payroll_runs ("
+                "run_id TEXT PRIMARY KEY, "
+                "pay_date DATE NOT NULL, "
+                "status TEXT NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO payroll_runs (run_id, pay_date, status) "
+                "VALUES ('PR-PAID', '2025-01-31', 'PAID')"
+            )
+        )
+
+    revision = _load_historical_pay_date_revision()
+    with engine.begin() as connection:
+        _run_revision(connection, revision, "upgrade")
+        assert inspect(connection).get_columns("payroll_runs")[1]["nullable"]
+        connection.execute(
+            text(
+                "INSERT INTO payroll_runs (run_id, pay_date, status) "
+                "VALUES ('PR-UNDATED', NULL, 'POSTED - PAYMENT PENDING')"
+            )
+        )
+        assert connection.execute(
+            text(
+                "SELECT pay_date, status FROM payroll_runs "
+                "WHERE run_id = 'PR-PAID'"
+            )
+        ).one() == ("2025-01-31", "PAID")
+        assert connection.execute(
+            text(
+                "SELECT pay_date, status FROM payroll_runs "
+                "WHERE run_id = 'PR-UNDATED'"
+            )
+        ).one() == (None, "POSTED - PAYMENT PENDING")
     engine.dispose()

@@ -1,7 +1,9 @@
 
+import argparse
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
+from uuid import uuid4
 
 import pandas as pd
 from sqlalchemy import (
@@ -296,7 +298,7 @@ def csv_row_count(path):
         )
 
 
-def main():
+def main(*, confirm_refresh: bool = False):
     if not DICTIONARY_FILE.exists():
         raise FileNotFoundError(
             f"Missing data dictionary: {DICTIONARY_FILE}"
@@ -378,6 +380,20 @@ def main():
     # One transaction: either the complete refresh succeeds, or its
     # deletes and inserts are rolled back.
     with engine.begin() as connection:
+        populated_tables = [
+            name
+            for name in order
+            if connection.execute(
+                text(f'SELECT COUNT(*) FROM "{name}"')
+            ).scalar_one()
+        ]
+        if populated_tables and not confirm_refresh:
+            raise RuntimeError(
+                "Refusing to replace existing CSV-managed data in "
+                f"{', '.join(populated_tables)}. Use --confirm-refresh only "
+                "when a complete CSV refresh is intended."
+            )
+
         # Clear child tables before parent tables.
         for name in reversed(order):
             connection.execute(text(f'DELETE FROM "{name}"'))
@@ -406,6 +422,9 @@ def main():
                         )
                         for column, value in record.items()
                     }
+
+                    if name == "tax_parameters":
+                        clean["tax_parameter_id"] = str(uuid4())
 
                     if name == "chart_of_accounts":
                         clean["parent_code"] = normalize_account_parent_code(
@@ -471,4 +490,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Load CSV data into the configured LedgerForge database."
+    )
+    parser.add_argument(
+        "--confirm-refresh",
+        action="store_true",
+        help="allow replacing rows in CSV-managed tables",
+    )
+    main(confirm_refresh=parser.parse_args().confirm_refresh)

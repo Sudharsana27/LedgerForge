@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from sqlalchemy import MetaData, Table, inspect, select
 from sqlalchemy.orm import Session
@@ -207,6 +207,7 @@ def run_batch_validation(
     data_dir: Path,
     output_dir: Path,
     payroll_inputs_path: Path | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, object]:
     """Calculate only rows with explicit independent payroll inputs."""
     data_dir = Path(data_dir)
@@ -274,6 +275,13 @@ def run_batch_validation(
     employees = db.scalars(
         select(Employee).order_by(Employee.employee_id)
     ).all()
+    total_to_process = sum(
+        1
+        for period_start, period_end in runs.values()
+        for employee in employees
+        if employee.hire_date <= period_end
+        and (employee.exit_date is None or employee.exit_date >= period_start)
+    )
     result_rows: list[dict[str, object]] = []
     exception_rows: list[dict[str, object]] = []
     comparison_rows: list[dict[str, object]] = []
@@ -293,6 +301,8 @@ def run_batch_validation(
             ):
                 continue
             processed += 1
+            if progress_callback is not None:
+                progress_callback(processed, total_to_process)
             key = (employee.employee_id, run_id)
             input_row = independent_inputs.get(key)
             if input_row is None:

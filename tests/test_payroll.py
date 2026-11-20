@@ -1081,15 +1081,20 @@ def test_batch_validation_calculates_only_rows_with_independent_inputs(
     output_dir = tmp_path / "output"
     data_dir.mkdir()
     _write_batch_inputs(data_dir, include_inputs=True)
+    progress_updates = []
 
     with sessions() as db:
         summary = run_batch_validation(
             db,
             data_dir=data_dir,
             output_dir=output_dir,
+            progress_callback=lambda completed, total: progress_updates.append(
+                (completed, total)
+            ),
         )
 
     assert summary["processed"] == 3
+    assert progress_updates == [(1, 3), (2, 3), (3, 3)]
     assert summary["successful"] == 1
     assert summary["skipped"] == 2
     assert summary["errors"] == 0

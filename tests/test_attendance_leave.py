@@ -1,10 +1,8 @@
 from datetime import date
 from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from threading import Barrier
 
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
@@ -12,7 +10,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import AuthenticatedPrincipal, get_authenticated_principal
-from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -28,7 +25,7 @@ from app.models import (
 from app.leave_service import LeaveError, apply_for_leave
 
 
-SOURCE_HAND_COUNTS = {
+SYNTHETIC_SUMMARY_EXPECTATIONS = {
     "EMP-0002": {
         "days_present": 2,
         "work_from_home_days": 18,
@@ -71,26 +68,14 @@ def test_database():
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
-        departments_file = Path(settings.data_dir).resolve() / "departments.csv"
-        department_rows = pd.read_csv(departments_file)
-        department_ids = set()
-        for record in department_rows.to_dict(orient="records"):
-            record["description"] = (
-                None
-                if pd.isna(record.get("description"))
-                else record.get("description")
+        db.add(
+            Department(
+                department_id="D01",
+                department_name="Engineering",
+                cost_center="CC01",
+                description="Synthetic test department",
             )
-            department_ids.add(record["department_id"])
-            db.add(Department(**record))
-        if "D01" not in department_ids:
-            db.add(
-                Department(
-                    department_id="D01",
-                    department_name="Engineering",
-                    cost_center="CC01",
-                    description="Test department",
-                )
-            )
+        )
         db.add(
             Role(
                 role_id="R01",
@@ -105,7 +90,7 @@ def test_database():
                 band_year=2026,
             )
         )
-        for employee_id in SOURCE_HAND_COUNTS:
+        for employee_id in SYNTHETIC_SUMMARY_EXPECTATIONS:
             db.add(
                 Employee(
                     employee_id=employee_id,
@@ -148,7 +133,7 @@ def test_database():
                     policy_note="Test policy",
                 )
             )
-        for employee_id in SOURCE_HAND_COUNTS:
+        for employee_id in SYNTHETIC_SUMMARY_EXPECTATIONS:
             db.add(
                 LeaveBalance(
                     employee_id=employee_id,
@@ -182,62 +167,65 @@ def test_database():
                 )
             )
 
-        holidays_file = Path(settings.data_dir).resolve() / "holidays.csv"
-        holiday_rows = pd.read_csv(holidays_file)
-        for record in holiday_rows.to_dict(orient="records"):
-            record["holiday_date"] = date.fromisoformat(
-                record["holiday_date"]
-            )
-            db.add(Holiday(**record))
-        db.add(
-            Holiday(
-                holiday_date=date(2026, 8, 3),
-                holiday_name="Test regional holiday",
-                holiday_type="Regional",
-                weekday="Monday",
-                falls_on_weekend="N",
-                calendar_note="Test calendar",
-            )
-        )
-        db.commit()
-
-        source_file = Path(settings.data_dir).resolve() / "attendance.csv"
-        source_rows = pd.read_csv(
-            source_file,
-            usecols=[
-                "attendance_id",
-                "employee_id",
-                "attendance_date",
-                "weekday",
-                "status",
-                "leave_type_code",
-                "check_in",
-                "check_out",
-                "hours_worked",
-                "overtime_hours",
-                "late_flag",
-                "source",
-                "data_quality_flag",
-                "department_id",
-            ],
-        )
-        source_rows = source_rows[
-            source_rows.employee_id.isin(SOURCE_HAND_COUNTS)
-            & source_rows.attendance_date.str.startswith("2025-04-")
-        ]
-        for record in source_rows.to_dict(orient="records"):
-            record["attendance_date"] = date.fromisoformat(
-                record["attendance_date"]
-            )
-            for field in ("hours_worked", "overtime_hours"):
-                value = record[field]
-                record[field] = (
-                    None if pd.isna(value) else Decimal(str(value))
+        for holiday_date, holiday_name in (
+            (date(2025, 4, 18), "Synthetic holiday one"),
+            (date(2025, 4, 21), "Synthetic holiday two"),
+            (date(2026, 3, 20), "Synthetic leave-calendar holiday one"),
+            (date(2026, 4, 14), "Synthetic leave-calendar holiday two"),
+            (date(2026, 5, 1), "Synthetic leave-calendar holiday three"),
+            (date(2026, 6, 15), "Synthetic leave-calendar holiday four"),
+            (date(2026, 7, 1), "Synthetic leave-calendar holiday five"),
+            (date(2026, 8, 3), "Test regional holiday"),
+        ):
+            db.add(
+                Holiday(
+                    holiday_date=holiday_date,
+                    holiday_name=holiday_name,
+                    holiday_type="Test",
+                    weekday=holiday_date.strftime("%A"),
+                    falls_on_weekend="N",
+                    calendar_note="Synthetic test calendar",
                 )
-            for field, value in record.items():
-                if pd.isna(value):
-                    record[field] = None
-            db.add(Attendance(**record))
+            )
+
+        april_workdays = [
+            date(2025, 4, day)
+            for day in range(1, 31)
+            if date(2025, 4, day).weekday() < 5
+            and day not in {18, 21}
+        ]
+        for employee_id, expected in SYNTHETIC_SUMMARY_EXPECTATIONS.items():
+            statuses = (
+                ["PRESENT"] * expected["days_present"]
+                + ["WFH"] * expected["work_from_home_days"]
+                + ["PAID_LEAVE"]
+                * (
+                    len(april_workdays)
+                    - expected["days_present"]
+                    - expected["work_from_home_days"]
+                )
+            )
+            for index, (attendance_date, attendance_status) in enumerate(
+                zip(april_workdays, statuses)
+            ):
+                db.add(
+                    Attendance(
+                        attendance_id=f"ATT-{employee_id}-{index:02}",
+                        employee_id=employee_id,
+                        attendance_date=attendance_date,
+                        weekday=attendance_date.strftime("%a"),
+                        status=attendance_status,
+                        leave_type_code=None,
+                        check_in=None,
+                        check_out=None,
+                        hours_worked=None,
+                        overtime_hours=Decimal("0"),
+                        late_flag="Y" if index == 0 and expected["late_days"] else "N",
+                        source="Synthetic test fixture",
+                        data_quality_flag=None,
+                        department_id="D01",
+                    )
+                )
 
         db.add(
             Attendance(
@@ -245,7 +233,7 @@ def test_database():
                 employee_id="EMP-0002",
                 attendance_date=date(2025, 5, 5),
                 weekday="Mon",
-                status="PRESENT",
+                status="WFH",
                 leave_type_code=None,
                 check_in="09:00",
                 check_out=None,
@@ -324,9 +312,9 @@ def client(test_database):
 
 @pytest.mark.parametrize(
     ("employee_id", "expected"),
-    SOURCE_HAND_COUNTS.items(),
+    SYNTHETIC_SUMMARY_EXPECTATIONS.items(),
 )
-def test_monthly_summaries_match_independent_csv_counts(
+def test_monthly_summaries_aggregate_synthetic_attendance(
     client, employee_id, expected
 ):
     response = client.get(
@@ -349,7 +337,7 @@ def test_attendance_missing_checkout_and_empty_month(client):
         params={"month": "2025-05"},
     )
     assert missing.status_code == 200
-    assert missing.json()["days_present"] == 2
+    assert missing.json()["days_present"] == 1
     assert missing.json()["missing_checkout_count"] == 1
     assert missing.json()["absent_days"] == 0.5
     assert missing.json()["overtime_hours"] == 2.5

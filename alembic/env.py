@@ -5,7 +5,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.config import settings
+from app.config import normalize_database_url, settings
 from app.database import Base
 from app import models  # Register all SQLAlchemy models
 
@@ -15,9 +15,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Use the database URL from app/config.py and .env
-database_url = os.environ.get(
-    "DATABASE_URL",
-    settings.database_url,
+database_url = normalize_database_url(
+    os.environ.get("DATABASE_URL", settings.database_url)
 )
 
 config.set_main_option(

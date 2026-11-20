@@ -1,8 +1,78 @@
-# Optional: a local PostgreSQL for development.  Run:  docker compose -f docker-compose.dev.yml up -d
 services:
+  migrate-seed:
+    build: .
+    command: python -m alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ledger:ledger@db:5432/ledgerforge
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+  seed:
+    build: .
+    command: python -m scripts.seed
+    profiles: ["seed"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ledger:ledger@db:5432/ledgerforge
+      DATA_DIR: /data
+    volumes:
+      - ../03_Data/csv:/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate-seed:
+        condition: service_completed_successfully
+  api:
+    build: .
+    command: python -m scripts.start_api
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ledger:ledger@db:5432/ledgerforge
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate-seed:
+        condition: service_completed_successfully
+  worker:
+    build: .
+    command: celery -A app.celery_app.celery_app worker --loglevel=info
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ledger:ledger@db:5432/ledgerforge
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app.celery_app inspect ping --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
   db:
     image: postgres:16
     environment: { POSTGRES_USER: ledger, POSTGRES_PASSWORD: ledger, POSTGRES_DB: ledgerforge }
     ports: ["5432:5432"]
     volumes: [ledger_pg:/var/lib/postgresql/data]
-volumes: { ledger_pg: {} }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledgerforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  ledger_pg: {}
