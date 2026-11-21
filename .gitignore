@@ -6,3 +6,7 @@ __pycache__/
 *.db
 .pytest_cache/
 alembic/__pycache__/
+
+# Local database backups
+/backups/
+*.dump

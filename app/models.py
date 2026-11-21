@@ -118,6 +118,9 @@ class Employee(Base):
     created_at: Mapped[date | None] = mapped_column(
         Date, nullable=True
     )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
 
 class EmployeeAssignment(Base):
@@ -150,6 +153,8 @@ class EmployeeAssignment(Base):
 
 Index("ix_employees_department_id", Employee.department_id)
 Index("ix_employees_manager_id", Employee.manager_id)
+Index("ix_employees_created_at", Employee.created_at)
+Index("ix_employees_updated_at", Employee.updated_at)
 
 
 class SalaryComponent(Base):
@@ -475,6 +480,7 @@ class JournalEntry(Base):
             name="ck_journal_entries_balanced_totals",
         ),
         Index("ix_journal_entries_entry_date", "entry_date"),
+        Index("ix_journal_entries_created_at", "created_at"),
     )
 
 
@@ -1042,6 +1048,7 @@ class PayrollRun(Base):
             name="ck_payroll_runs_status",
         ),
         Index("ix_payroll_runs_period", "period_start", "period_end"),
+        Index("ix_payroll_runs_created_at", "created_at"),
     )
 
 
@@ -1140,6 +1147,7 @@ class PayrollItem(Base):
             name="ck_payroll_items_period",
         ),
         Index("ix_payroll_items_employee_period", "employee_id", "period_start"),
+        Index("ix_payroll_items_period_run", "period_start", "period_end", "run_id"),
     )
 
 

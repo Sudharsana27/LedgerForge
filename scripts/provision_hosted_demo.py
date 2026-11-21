@@ -1,20 +1,19 @@
 import argparse
+import os
 from datetime import date
 from getpass import getpass
-from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import MetaData, Table, func, inspect, select, text
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from app.auth import hash_password
+from app.config import normalize_database_url
 from app.database import SessionLocal, engine
 from app.models import Department, Employee, Role, User
 
 
-DATABASE_NAME = "ledgerforge_demo"
+DATABASE_NAME = "ledgerforge_wirm"
 DEMO_IDS = {
     "department": "DEMO01",
     "role": "DEMO01",
@@ -33,14 +32,30 @@ def validate_target(url: URL, expected_host: str) -> None:
     ):
         raise RuntimeError(
             "Refusing to run: use PostgreSQL with the explicitly confirmed "
-            "host and the new ledgerforge_demo database."
+            f"host and the {DATABASE_NAME} database."
         )
 
 
-def ensure_database_empty(db: Session) -> None:
+def validate_private_database_url(expected_host: str) -> None:
+    raw_url = os.environ.get("DATABASE_URL")
+    if not raw_url:
+        raise RuntimeError(
+            "Refusing to run: set DATABASE_URL in the private process "
+            "environment; values loaded only from .env are not accepted."
+        )
+    private_url = make_url(normalize_database_url(raw_url))
+    validate_target(private_url, expected_host)
+    if private_url != engine.url:
+        raise RuntimeError(
+            "Refusing to run: DATABASE_URL does not match the application's "
+            "configured database target."
+        )
+
+
+def database_inventory(db: Session) -> dict[str, int]:
     inspector = inspect(db.get_bind())
     metadata = MetaData()
-    populated = []
+    inventory = {}
     schemas = [
         schema
         for schema in inspector.get_schema_names()
@@ -56,14 +71,49 @@ def ensure_database_empty(db: Session) -> None:
                 schema=schema,
                 autoload_with=db.get_bind(),
             )
-            count = db.scalar(select(func.count()).select_from(table))
-            if count:
-                populated.append(f"{schema}.{table_name}")
+            inventory[f"{schema}.{table_name}"] = db.scalar(
+                select(func.count()).select_from(table)
+            )
+    return inventory
+
+
+def ensure_schema_ready(inventory: dict[str, int]) -> None:
+    required_tables = {
+        f"public.{model.__table__.name}"
+        for model in (Department, Role, Employee, User)
+    }
+    missing = required_tables - inventory.keys()
+    if missing:
+        raise RuntimeError(
+            "Refusing to provision: required public schema tables are missing: "
+            + ", ".join(sorted(missing))
+        )
+
+
+def ensure_database_empty(inventory: dict[str, int]) -> None:
+    populated = [
+        table_name
+        for table_name, count in inventory.items()
+        if not table_name.endswith(".alembic_version") and count
+    ]
     if populated:
         raise RuntimeError(
             "Refusing to provision a non-empty database. Populated tables: "
             + ", ".join(sorted(populated))
         )
+
+
+def read_only_inventory(expected_host: str) -> dict[str, int]:
+    validate_private_database_url(expected_host)
+    with engine.connect() as connection:
+        with connection.begin():
+            connection.execute(text("SET TRANSACTION READ ONLY"))
+            with Session(bind=connection) as db:
+                if db.scalar(text("SELECT current_database()")) != DATABASE_NAME:
+                    raise RuntimeError(
+                        "Connected database name does not match target."
+                    )
+                return database_inventory(db)
 
 
 def lock_database_tables(db: Session) -> None:
@@ -177,45 +227,60 @@ def create_records(db: Session, password_hash: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Provision one synthetic demo account in a new, empty hosted "
-            "ledgerforge_demo PostgreSQL database."
+            "Provision one synthetic demo account in an empty "
+            f"{DATABASE_NAME} PostgreSQL database."
         )
     )
     parser.add_argument("--expected-host", required=True)
-    parser.add_argument("--confirm-demo", action="store_true")
-    args = parser.parse_args()
-    validate_target(engine.url, args.expected_host)
-    if not args.confirm_demo:
-        raise SystemExit("Pass --confirm-demo to enable the typed confirmation.")
-
-    with SessionLocal() as db:
-        if db.scalar(text("SELECT current_database()")) != DATABASE_NAME:
-            raise RuntimeError("Connected database name does not match target.")
-        ensure_database_empty(db)
-
-    confirmation = input(
-        f"Type CREATE-SYNTHETIC-DEMO {DATABASE_NAME}@{args.expected_host} "
-        "to continue: "
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="inspect schema and row counts without modifying the database",
     )
-    if confirmation != f"CREATE-SYNTHETIC-DEMO {DATABASE_NAME}@{args.expected_host}":
-        raise SystemExit("Cancelled; no changes made.")
+    args = parser.parse_args()
+
+    inventory = read_only_inventory(args.expected_host)
+    print(f"database={DATABASE_NAME}")
+    if inventory:
+        for table_name, count in sorted(inventory.items()):
+            print(f"{table_name} rows={count}")
+    else:
+        print("No user tables found.")
+
+    if args.preflight_only:
+        return
+
+    ensure_schema_ready(inventory)
+    ensure_database_empty(inventory)
 
     password = read_password()
     password_hash = hash_password(password)
     del password
 
-    alembic_config = Config(
-        str(Path(__file__).resolve().parents[1] / "alembic.ini")
-    )
-    command.upgrade(alembic_config, "head")
-
     with SessionLocal.begin() as db:
-        validate_target(engine.url, args.expected_host)
+        validate_private_database_url(args.expected_host)
         if db.scalar(text("SELECT current_database()")) != DATABASE_NAME:
             raise RuntimeError("Connected database name changed; refusing.")
         lock_database_tables(db)
-        ensure_database_empty(db)
+        inventory = database_inventory(db)
+        ensure_schema_ready(inventory)
+        ensure_database_empty(inventory)
+        confirmation = input(
+            f"Type INSERT-SYNTHETIC-DEMO {DATABASE_NAME}@"
+            f"{args.expected_host} to authorize these four synthetic records: "
+        )
+        if confirmation != (
+            f"INSERT-SYNTHETIC-DEMO {DATABASE_NAME}@{args.expected_host}"
+        ):
+            raise SystemExit("Cancelled; no changes made.")
         create_records(db, password_hash)
+        if any(
+            db.scalar(select(func.count()).select_from(model)) != 1
+            for model in (Department, Role, Employee, User)
+        ):
+            raise RuntimeError(
+                "Synthetic record count verification failed; rolling back."
+            )
 
     print("Synthetic demo account created.")
     print("Username: demo_admin")

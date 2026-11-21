@@ -1,4 +1,8 @@
 from pathlib import Path
+import json
+import logging
+import time
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -7,6 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .database import Base, engine
+from .config import settings
+from redis import Redis
+from redis.exceptions import RedisError
 from .routers import (
     attendance,
     auth,
@@ -34,9 +41,36 @@ app = FastAPI(
     description="Payroll, accounting and employee data engine for Zenith Nova Technologies",
 )
 
+
+@app.middleware("http")
+async def structured_request_logging(request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid4())
+    started = time.perf_counter()
+    response = await call_next(request)
+    record = {
+        "event": "http_request",
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+    }
+    logging.getLogger("ledgerforge.structured").info(
+        json.dumps(record, separators=(",", ":"))
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 @app.get("/health", tags=["system"])
 @app.get("/api/v1/health", tags=["system"])
 def health():
+    cache_status = "disabled"
+    if settings.redis_url:
+        try:
+            Redis.from_url(settings.redis_url, socket_connect_timeout=1).ping()
+            cache_status = "ok"
+        except (RedisError, TimeoutError):
+            cache_status = "unavailable"
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
@@ -47,12 +81,14 @@ def health():
                 "status": "unhealthy",
                 "service": "ledgerforge",
                 "database": "unavailable",
+                "cache": cache_status,
             },
         )
     return {
         "status": "ok",
         "service": "ledgerforge",
         "database": "ok",
+        "cache": cache_status,
         "api_version": "v1",
     }
 

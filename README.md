@@ -1035,8 +1035,8 @@ leave behavior, so CI does not require the external training CSV directory.
 The three payslip source-comparison cases require the external LF-08 source
 CSV files and skip when those files are absent; synthetic tests do not claim
 official reconciliation results. The latest full local run, with all 11
-required source files available, completed with 220 passed, 0 skipped, and
-84% app coverage.
+required source files available, completed with 227 passed, 0 skipped, and
+84% app coverage after the final Task 17/18 additions.
 
 For hosted deployment, set `DATABASE_URL` and a strong `SECRET_KEY` in the
 hosting dashboard. `REDIS_URL` is optional: without Redis and a responding
@@ -1049,6 +1049,38 @@ settings, applies Alembic migrations, then starts Uvicorn using the provider's
 the approved CSV directory mounted/readable and `DATABASE_URL` set to the
 hosted database.
 Do not include CSV files or production credentials in Git or the Docker image.
+
+#### CSV/XLSX exports and API documentation
+
+The API provides authenticated CSV and XLSX exports:
+
+- `GET /api/v1/exports/employees`
+- `GET /api/v1/exports/payroll`
+- `GET /api/v1/exports/ledger`
+
+Each export accepts `format=csv` or `format=xlsx`. Employee exports support
+`changed_since`. Payroll and ledger exports support `start_date`, `end_date`,
+and `changed_since`. Export responses use attachment filenames:
+`employees.csv`, `employees.xlsx`, `payroll.csv`, `payroll.xlsx`,
+`ledger.csv`, or `ledger.xlsx`.
+
+Example requests:
+
+```powershell
+curl.exe -i "http://localhost:8000/api/v1/exports/employees?changed_since=2026-11-01&format=csv" `
+  -H "Authorization: Bearer <access-token>"
+
+curl.exe -i "http://localhost:8000/api/v1/exports/payroll?start_date=2026-01-01&end_date=2026-06-30&format=xlsx" `
+  -H "Authorization: Bearer <access-token>"
+
+curl.exe -i "http://localhost:8000/api/v1/exports/ledger?start_date=2026-01-01&end_date=2026-06-30&format=csv" `
+  -H "Authorization: Bearer <access-token>"
+```
+
+See [Task 19 export and API documentation](docs/TASK19_EXPORTS_API.md) for
+authentication requirements, additional working API requests, and the
+architecture diagram. Interactive OpenAPI documentation remains available at
+`/docs` and `/openapi.json`.
 
 The live smoke test performs read-only health/docs checks, authentication,
 and a stateless payroll calculation; it does not create, approve, or pay a
@@ -1093,12 +1125,13 @@ official payroll reconciliation.
 
 #### Task 17 hosting recommendation and limits
 
-The Render Docker web service is reported live at
-[`https://ledgerforge-bzmo.onrender.com`](https://ledgerforge-bzmo.onrender.com);
-the API health and Swagger endpoints were verified in the prior deployment
-step. The responsive same-origin interface is served at `/demo/` by the
-application image and will require an approved deployment of the current
-worktree before that public URL serves it. The site root redirects to `/demo/`.
+The Render Docker web service uses
+[`https://ledgerforge-bzmo.onrender.com`](https://ledgerforge-bzmo.onrender.com).
+On 2026-11-21, a read-only `GET /api/v1/health` returned HTTP 200 with
+`status=ok` and `database=ok`. This confirms the live health route and a
+database connection at that time. The deployed commit and migration version
+were not independently read, and live login, payroll preview, and payslip
+behavior remain unverified. The site root redirects to `/demo/`.
 
 The interface offers bearer-token login, an explicit-input stateless payroll
 calculation preview, 18-month Celery job submission/status, and authorized
@@ -1138,59 +1171,66 @@ machine and Managed Postgres from $38/month, before storage and egress; it is
 not a free all-in-one deployment. Prices and terms were checked against
 provider documentation on 2026-11-20; recheck before choosing or paying.
 
-The Render PostgreSQL resource is reported as created, but its plan, expiry,
-region, and data limits have not been independently verified here. The
-reported public API does not mean the current UI worktree is deployed. No
-hosted demo account has been provisioned from this workstation.
+#### Submission status — 21 November 2026
 
-##### Manual Render deployment checklist (not yet executed)
+The public demo URL is
+[`https://ledgerforge-bzmo.onrender.com`](https://ledgerforge-bzmo.onrender.com).
+The demo login, `DEMOEMP001` account, and synthetic salary data are
+user-reported as present. The hosted database is user-reported at Alembic
+revision `6f2b18d4a731`. An earlier startup issue was reported for an older
+commit, but the read-only health check on 2026-11-21 returned HTTP 200 and
+`database=ok`; the deployed commit and migration version were not read in
+that check. No hosted database was modified as part of this submission
+preparation.
+
+Tasks 18 and 19 are locally verified: the isolated 18-DRAFT PostgreSQL
+benchmark processed all 18 runs, backup/restore succeeded, export paths were
+implemented and focused regression tests passed. Task 17 remains partial:
+hosted login and synthetic salary presence are user-reported, but successful
+hosted November payroll preview and a hosted payslip have not been verified.
+No hosted payroll run or payslip was created. The free Render deployment has
+no verified Redis/Celery worker; background payroll jobs remain unavailable.
+
+##### Task 17 live deployment and provisioning status
 
 ##### Guarded synthetic demo account provisioning
 
-The separate `scripts/provision_hosted_demo.py` command is restricted to a
-PostgreSQL database named `ledgerforge_demo`, requires the expected hostname
-as an argument and an exact typed confirmation, and checks every application
-table is empty before inserting anything (the Alembic version table may
-contain migration metadata). It creates only the same clearly labeled
-synthetic demo department, role, employee, and user; it never loads CSV data.
-It refuses all existing business records, including payroll history. Run it
-only against a newly created, empty demo database, never the existing
-LedgerForge or production database.
+The guarded `scripts/provision_hosted_demo.py` command targets only the
+existing Render PostgreSQL database named `ledgerforge_wirm`. It requires
+`DATABASE_URL` in the process environment (a URL available only through
+`.env` is rejected), an exact `--expected-host` match, the required existing
+public schema tables, and zero rows in every application table except
+Alembic migration metadata. It never runs migrations, imports CSV data, or
+overwrites records. It prints table row counts in `--preflight-only` mode.
+Provisioning prompts for a password without echoing it, takes table locks,
+rechecks emptiness in a transaction, and requires the exact typed
+`INSERT-SYNTHETIC-DEMO ledgerforge_wirm@HOST` authorization immediately
+before adding the synthetic department, role, employee, and user. Any
+existing business or payroll rows block provisioning.
 
-After an authorized deployment of the current code, the operator should:
+The account already exists according to the current deployment status. Do
+not run this empty-database account provisioning procedure against the
+existing hosted database. It is retained only for an explicitly authorized,
+new empty demo database:
 
-1. Verify the Render database is free, temporary, newly created, and intended
-   solely for synthetic demo records. Confirm its database name is exactly
-   `ledgerforge_demo`. If not, stop.
-2. In a private local checkout, create the ignored `.env` from `.env.example`
-   only if it does not already exist. Set `DATABASE_URL` to that new
-   database's internal URL and set a strong `SECRET_KEY`. Do not overwrite
-   any existing `.env`; do not paste either value into a command, commit, log,
-   or chat. PowerShell:
-
-   ```powershell
-   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-   notepad .env
-   ```
-3. Confirm the URL hostname and database name in the local secret
-   manager/editor, then run:
+1. Set `DATABASE_URL` in the private environment available to the process.
+   Do not put its value in a command, tracked file, log, or chat. Obtain the
+   exact hostname from the private Render database settings.
+2. Run the read-only schema and row-count preflight first:
 
    ```powershell
    python -m scripts.provision_hosted_demo `
      --expected-host YOUR-EXACT-POSTGRES-HOST `
-     --confirm-demo
+     --preflight-only
    ```
 
-   The provisioning command prompts for a typed
-   `CREATE-SYNTHETIC-DEMO ledgerforge_demo@YOUR-EXACT-POSTGRES-HOST`
-   confirmation and prompts twice for the password without echoing it. It
-   then applies Alembic migrations and creates the synthetic rows. It prints
-   only success and the synthetic username. If any business table is
-   populated, it refuses to proceed. It takes PostgreSQL table write locks
-   during the final empty-database check and insert to avoid races with
-   concurrent writers. If migration or record creation fails, record changes
-   are rolled back; migrations may already have completed on that still-empty
-   target.
+   Review every reported count. Stop if any application table is populated
+   or the required schema is missing. Do not run provisioning against a
+   database containing existing LedgerForge or payroll records.
+3. If and only if the preflight confirms a ready, empty target, run the same
+   command without `--preflight-only`. Confirm the database name and exact
+   hostname at the final typed authorization prompt. The command creates no
+   payroll runs, payroll results, or payslips.
 4. Verify the UI at `https://YOUR-RENDER-HOST/demo/`, sign in as
    `demo_admin`, and test the read-only, stateless payroll calculation only
    with actual authorized synthetic payroll inputs already present.
@@ -1202,12 +1242,14 @@ After an authorized deployment of the current code, the operator should:
    free-only service configuration has no background worker; the UI/API
    should report HTTP 503 and must not run payroll inline.
 
-The same-origin UI and scripts are not live until an approved code deployment.
-Manual blockers are deployment approval, confirmation of the new database's
-free plan and hostname, authorization to provision synthetic data, and an
-authorized password. The free setup cannot perform the required 18-month
-Celery payroll job. Do not load real payroll or employee information into
-free or ephemeral services.
+The same-origin UI is reachable at the reported live URL. The guarded
+reviewer-account helper is a local change and must be reviewed before use.
+Do not run the empty-database provisioning procedure against the existing
+hosted demo. Reviewer account preflight and any HR/Employee account inserts
+require an operator using the private database environment; insert mode also
+requires explicit typed confirmation and securely entered passwords. The
+free setup cannot perform the required 18-month Celery payroll job. Do not
+load real payroll or employee information into free or ephemeral services.
 
 Render's [free service types and limitations](https://render.com/docs/free)
 list free web services, PostgreSQL, and Key Value, but not background workers.

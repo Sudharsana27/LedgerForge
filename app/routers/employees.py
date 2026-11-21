@@ -1,5 +1,5 @@
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
@@ -134,6 +134,8 @@ def create_employee(
     )
 
     employee = Employee(**data)
+    employee.created_at = date.today()
+    employee.updated_at = datetime.now(timezone.utc)
     db.add(employee)
 
     try:
@@ -186,6 +188,7 @@ def update_employee(
 
     for field, value in changes.items():
         setattr(employee, field, value)
+    employee.updated_at = datetime.now(timezone.utc)
 
     try:
         db.commit()
@@ -214,6 +217,7 @@ def soft_delete_employee(
 
     if employee.exit_date is None:
         employee.exit_date = date.today()
+        employee.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(employee)
 
